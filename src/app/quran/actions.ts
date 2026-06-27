@@ -15,25 +15,14 @@ function text(form: FormData, key: string): string {
   return (form.get(key) as string | null)?.trim() ?? "";
 }
 
-function nullable(form: FormData, key: string): string | null {
-  const v = text(form, key);
-  return v === "" ? null : v;
-}
-
 function positiveNumber(form: FormData, key: string): number | null {
   const v = text(form, key);
   const n = v === "" ? NaN : Number(v);
   return Number.isFinite(n) && n >= 0 ? n : null;
 }
 
-function intOrNull(form: FormData, key: string): number | null {
-  const v = text(form, key);
-  const n = parseInt(v, 10);
-  return Number.isFinite(n) && n > 0 ? n : null;
-}
-
 /**
- * Bulk-logs one Quran lesson per student in a single submit.
+ * Bulk-logs one Quran memorization entry per student in a single submit.
  * Students whose `lines_N` field is empty are silently skipped.
  * The shared `date` applies to every row that is saved.
  */
@@ -85,11 +74,11 @@ export async function logQuranLessons(
     rows.push({
       student_id: studentId,
       date,
-      surah: nullable(form, `surah_${studentId}`),
-      from_ayah: intOrNull(form, `from_${studentId}`),
-      to_ayah: intOrNull(form, `to_${studentId}`),
+      surah: null,
+      from_ayah: null,
+      to_ayah: null,
       lines_memorized: lines,
-      note: nullable(form, `note_${studentId}`),
+      note: null,
       recorded_by: profile.id,
       recorded_at: now,
     });

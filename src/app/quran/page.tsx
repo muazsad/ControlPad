@@ -96,7 +96,7 @@ export default async function QuranPage() {
         <div className="mx-auto max-w-6xl space-y-6">
           <PageHeader
             title="Quran / Hifz"
-            description="Log today's lessons for all students in one go. Rows left blank are skipped."
+            description="Log today's memorized lines for all students in one go. Blank rows are skipped."
           />
           <Card className="overflow-hidden border shadow-sm">
             {students.length === 0 ? (

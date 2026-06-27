@@ -34,6 +34,8 @@ export function GradeForm({
   courseName,
 }: GradeFormProps) {
   const formRef = useRef<HTMLFormElement>(null);
+  const gradeInputId = `grade_value_${courseId}`;
+  const noteInputId = `note_${courseId}`;
   const [state, formAction] = useActionState<GradeActionState, FormData>(
     recordGrade,
     { error: null },
@@ -57,9 +59,9 @@ export function GradeForm({
 
       <div className="grid gap-4 sm:grid-cols-[160px_1fr_auto] sm:items-end">
         <div className="space-y-2">
-          <Label htmlFor="grade_value">Grade</Label>
+          <Label htmlFor={gradeInputId}>Grade</Label>
           <Input
-            id="grade_value"
+            id={gradeInputId}
             name="grade_value"
             type="number"
             min="0"
@@ -70,9 +72,9 @@ export function GradeForm({
           />
         </div>
         <div className="space-y-2">
-          <Label htmlFor="note">Note</Label>
+          <Label htmlFor={noteInputId}>Note</Label>
           <Input
-            id="note"
+            id={noteInputId}
             name="note"
             placeholder="Optional context from GCVS"
           />

@@ -21,6 +21,9 @@ import { createCourse, type GradeActionState } from "./actions";
 
 type CourseFormProps = {
   students: Student[];
+  fixedStudentId?: string;
+  redirectTo?: string;
+  compact?: boolean;
 };
 
 function SubmitButton() {
@@ -32,12 +35,17 @@ function SubmitButton() {
   );
 }
 
-export function CourseForm({ students }: CourseFormProps) {
+export function CourseForm({
+  students,
+  fixedStudentId,
+  redirectTo,
+  compact = false,
+}: CourseFormProps) {
   const [state, formAction] = useActionState<GradeActionState, FormData>(
     createCourse,
     { error: null },
   );
-  const [studentId, setStudentId] = useState("");
+  const [studentId, setStudentId] = useState(fixedStudentId ?? "");
 
   useEffect(() => {
     if (state.error) {
@@ -47,32 +55,50 @@ export function CourseForm({ students }: CourseFormProps) {
 
   return (
     <form action={formAction} className="space-y-4">
+      {fixedStudentId ? (
+        <input type="hidden" name="fixed_student_id" value={fixedStudentId} />
+      ) : null}
+      {redirectTo ? (
+        <input type="hidden" name="redirect_to" value={redirectTo} />
+      ) : null}
       {state.error ? <InlineError message={state.error} /> : null}
 
-      <div className="grid gap-4 sm:grid-cols-2">
-        <div className="space-y-2">
-          <Label htmlFor="student_id">Student</Label>
-          <input type="hidden" name="student_id" value={studentId} />
-          <Select value={studentId} onValueChange={setStudentId}>
-            <SelectTrigger id="student_id" className="h-10 w-full">
-              <SelectValue placeholder="Select student" />
-            </SelectTrigger>
-            <SelectContent>
-              {students.map((student) => (
-                <SelectItem key={student.id} value={student.id}>
-                  {studentName(student)}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
+      <div
+        className={
+          fixedStudentId ? "grid gap-4" : "grid gap-4 sm:grid-cols-2"
+        }
+      >
+        {fixedStudentId ? null : (
+          <div className="space-y-2">
+            <Label htmlFor="student_id">Student</Label>
+            <input type="hidden" name="student_id" value={studentId} />
+            <Select value={studentId} onValueChange={setStudentId}>
+              <SelectTrigger id="student_id" className="h-10 w-full">
+                <SelectValue placeholder="Select student" />
+              </SelectTrigger>
+              <SelectContent>
+                {students.map((student) => (
+                  <SelectItem key={student.id} value={student.id}>
+                    {studentName(student)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
         <div className="space-y-2">
           <Label htmlFor="name">Course name</Label>
           <Input id="name" name="name" required placeholder="Algebra I" />
         </div>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-[1fr_auto] sm:items-end">
+      <div
+        className={
+          compact
+            ? "grid gap-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end"
+            : "grid gap-4 sm:grid-cols-[1fr_auto] sm:items-end"
+        }
+      >
         <div className="space-y-2">
           <Label htmlFor="gcvs_course_code">GCVS code</Label>
           <Input

@@ -12,6 +12,7 @@ import { studentName, type Student } from "@/lib/people/people";
 import { createClient } from "@/lib/supabase/server";
 
 import { CourseForm } from "./course-form";
+import { formatGrade, gradeTone, latestGrade } from "./grade-display";
 
 type GradeSnapshot = {
   id: string;
@@ -28,23 +29,6 @@ type CourseRow = {
   students: Pick<Student, "id" | "first_name" | "last_name" | "grade_level">;
   grades: GradeSnapshot[];
 };
-
-function latestGrade(course: CourseRow) {
-  return course.grades[0] ?? null;
-}
-
-function gradeTone(value: number | null, gradeFloor: number | null) {
-  if (value === null) return "neutral";
-  if (gradeFloor === null) return "neutral";
-  if (value < gradeFloor) return "danger";
-  if (value < gradeFloor + 5) return "warning";
-  return "success";
-}
-
-function formatGrade(value: number | null) {
-  if (value === null) return "No data";
-  return `${Number.isInteger(value) ? value : value.toFixed(1)}%`;
-}
 
 export default async function GradesPage() {
   const profile = await getCurrentProfile();
@@ -164,7 +148,7 @@ export default async function GradesPage() {
                 key: "latest",
                 header: "Latest grade",
                 cell: (row) => {
-                  const latest = latestGrade(row);
+                  const latest = latestGrade(row.grades);
                   const value = latest ? Number(latest.grade_value) : null;
                   return (
                     <StatusBadge
@@ -178,7 +162,7 @@ export default async function GradesPage() {
                 key: "recorded",
                 header: "Recorded",
                 cell: (row) => {
-                  const latest = latestGrade(row);
+                  const latest = latestGrade(row.grades);
                   return latest
                     ? new Date(latest.recorded_at).toLocaleDateString()
                     : "—";

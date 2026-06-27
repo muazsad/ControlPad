@@ -1,8 +1,9 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, Pencil } from "lucide-react";
+import { ArrowLeft, BookOpen, Pencil, Plus } from "lucide-react";
 
 import { AppShell } from "@/components/controlpad/app-shell";
+import { EmptyState } from "@/components/controlpad/empty-state";
 import { PageHeader } from "@/components/controlpad/page-header";
 import { StatusBadge } from "@/components/controlpad/status-badge";
 import { Button } from "@/components/ui/button";
@@ -20,10 +21,28 @@ import {
   type Student,
 } from "@/lib/people/people";
 import { createClient } from "@/lib/supabase/server";
+import { CourseForm } from "@/app/grades/course-form";
+import { formatGrade, gradeTone, latestGrade } from "@/app/grades/grade-display";
+import { GradeForm } from "@/app/grades/grade-form";
 import {
   StudentGuardianLinks,
   type LinkedGuardian,
 } from "./student-guardian-links";
+
+type GradeSnapshot = {
+  id: string;
+  grade_value: number;
+  recorded_at: string;
+  note: string | null;
+};
+
+type CourseRow = {
+  id: string;
+  name: string;
+  gcvs_course_code: string | null;
+  student_id: string;
+  grades: GradeSnapshot[];
+};
 
 function Detail({ label, value }: { label: string; value: string | null }) {
   return (
@@ -58,17 +77,36 @@ export default async function StudentDetailPage({
   if (!student) notFound();
   const s = student as Student;
 
-  const { data: links } = await supabase
-    .from("student_guardians")
-    .select(
-      "relationship, is_primary, guardians(id, full_name, phone, email, user_id, created_at)",
-    )
-    .eq("student_id", id);
+  const [
+    { data: links },
+    { data: courseData },
+    { data: settingsData },
+  ] = await Promise.all([
+    supabase
+      .from("student_guardians")
+      .select(
+        "relationship, is_primary, guardians(id, full_name, phone, email, user_id, created_at)",
+      )
+      .eq("student_id", id),
+    supabase
+      .from("courses")
+      .select("id, name, gcvs_course_code, student_id, grades(id, grade_value, recorded_at, note)")
+      .eq("student_id", id)
+      .order("name", { ascending: true })
+      .order("recorded_at", {
+        referencedTable: "grades",
+        ascending: false,
+      }),
+    supabase.from("settings").select("grade_floor").eq("id", 1).single(),
+  ]);
 
   const linked: LinkedGuardian[] = (links ?? []).map((row) => {
     const g = row.guardians as unknown as Guardian;
     return { ...g, relationship: row.relationship, is_primary: row.is_primary };
   });
+  const courses = (courseData ?? []) as unknown as CourseRow[];
+  const gradeFloor =
+    settingsData?.grade_floor == null ? null : Number(settingsData.grade_floor);
 
   // Only admins can create links, so only they need the candidate list.
   let available: Guardian[] = [];
@@ -127,6 +165,82 @@ export default async function StudentDetailPage({
                 value={s.enrollment_status}
               />
             </dl>
+          </CardContent>
+        </Card>
+
+        <Card className="border shadow-sm">
+          <CardHeader className="space-y-3">
+            <CardTitle className="flex items-center gap-2">
+              <BookOpen className="size-5" aria-hidden="true" />
+              Classes / Grades
+            </CardTitle>
+            <div className="rounded-lg border bg-muted/25 p-4">
+              <div className="mb-3 flex items-center gap-2 text-sm font-medium">
+                <Plus className="size-4" aria-hidden="true" />
+                Add class
+              </div>
+              <CourseForm
+                students={[]}
+                fixedStudentId={s.id}
+                redirectTo={`/students/${s.id}`}
+                compact
+              />
+            </div>
+          </CardHeader>
+          <CardContent>
+            {courses.length === 0 ? (
+              <EmptyState
+                title="No classes yet"
+                description="Add this student's first GCVS class to start tracking grades."
+                icon={BookOpen}
+              />
+            ) : (
+              <div className="divide-y rounded-lg border">
+                {courses.map((course) => {
+                  const latest = latestGrade(course.grades);
+                  const latestValue = latest
+                    ? Number(latest.grade_value)
+                    : null;
+                  const recordedLabel = latest
+                    ? new Date(latest.recorded_at).toLocaleDateString()
+                    : "No grade recorded";
+
+                  return (
+                    <div
+                      key={course.id}
+                      className="grid gap-4 p-4 lg:grid-cols-[minmax(0,1fr)_160px_minmax(320px,1.4fr)] lg:items-start"
+                    >
+                      <div className="min-w-0">
+                        <Link
+                          href={`/grades/${course.id}`}
+                          className="font-medium text-primary hover:underline"
+                        >
+                          {course.name}
+                        </Link>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          {course.gcvs_course_code ?? "No GCVS code"}
+                        </p>
+                      </div>
+                      <div className="space-y-1">
+                        <StatusBadge
+                          status={formatGrade(latestValue)}
+                          tone={gradeTone(latestValue, gradeFloor)}
+                        />
+                        <p className="text-xs text-muted-foreground">
+                          {recordedLabel}
+                        </p>
+                      </div>
+                      <GradeForm
+                        courseId={course.id}
+                        studentId={s.id}
+                        studentName={studentName(s)}
+                        courseName={course.name}
+                      />
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </CardContent>
         </Card>
 

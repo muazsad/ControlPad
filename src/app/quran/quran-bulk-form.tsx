@@ -38,11 +38,11 @@ function SubmitBar({ saved }: { saved?: number }) {
         </span>
       ) : (
         <span className="text-sm text-muted-foreground">
-          Leave a student&apos;s row blank to skip them.
+          Leave a student&apos;s lines blank to skip them.
         </span>
       )}
       <Button type="submit" disabled={pending} className="h-10 min-w-36">
-        {pending ? "Saving…" : "Log all lessons"}
+        {pending ? "Saving…" : "Log lines"}
       </Button>
     </div>
   );
@@ -73,9 +73,9 @@ export function QuranBulkForm({
     }
     if (state.saved != null && !state.error) {
       toast.success(
-        `${state.saved} lesson${state.saved === 1 ? "" : "s"} logged for ${state.date}`,
+        `${state.saved} entr${state.saved === 1 ? "y" : "ies"} logged for ${state.date}`,
       );
-      // Reset all lesson fields but keep the date so the moderator can
+      // Reset all line fields but keep the date so the moderator can
       // quickly review what was just entered.
     }
   }, [state]);
@@ -164,34 +164,12 @@ export function QuranBulkForm({
                 )}
               </div>
 
-              {/* Lesson fields */}
-              <div className="grid grid-cols-2 gap-2 sm:grid-cols-[1fr_3rem_3rem_5rem_1fr]">
-                <Input
-                  name={`surah_${student.id}`}
-                  placeholder="Surah name"
-                  className="h-8 text-sm"
-                  autoComplete="off"
-                />
-                <Input
-                  name={`from_${student.id}`}
-                  placeholder="From"
-                  type="number"
-                  min={1}
-                  className="h-8 text-sm"
-                  title="From ayah"
-                />
-                <Input
-                  name={`to_${student.id}`}
-                  placeholder="To"
-                  type="number"
-                  min={1}
-                  className="h-8 text-sm"
-                  title="To ayah"
-                />
+              {/* Lines field */}
+              <div className="grid gap-2 sm:grid-cols-[minmax(160px,220px)]">
                 <div className="relative">
                   <Input
                     name={`lines_${student.id}`}
-                    placeholder="Lines"
+                    placeholder="Lines memorized"
                     type="number"
                     min={0}
                     step="0.5"
@@ -202,12 +180,6 @@ export function QuranBulkForm({
                     ln
                   </span>
                 </div>
-                <Input
-                  name={`note_${student.id}`}
-                  placeholder="Note (optional)"
-                  className="col-span-2 h-8 text-sm sm:col-span-1"
-                  autoComplete="off"
-                />
               </div>
             </div>
           );

@@ -13,6 +13,7 @@ import { getCurrentProfile } from "@/lib/auth/current-profile";
 import { studentName } from "@/lib/people/people";
 import { createClient } from "@/lib/supabase/server";
 
+import { formatGrade, gradeTone } from "../grade-display";
 import { GradeForm } from "../grade-form";
 
 type CourseDetail = {
@@ -34,17 +35,6 @@ type GradeRow = {
   note: string | null;
   recorded_at: string;
 };
-
-function gradeTone(value: number, gradeFloor: number | null) {
-  if (gradeFloor === null) return "neutral";
-  if (value < gradeFloor) return "danger";
-  if (value < gradeFloor + 5) return "warning";
-  return "success";
-}
-
-function formatGrade(value: number) {
-  return `${Number.isInteger(value) ? value : value.toFixed(1)}%`;
-}
 
 export default async function CourseGradesPage({
   params,

@@ -31,8 +31,10 @@ export async function createCourse(
 ): Promise<GradeActionState> {
   await requireRole(["admin", "moderator"]);
 
-  const studentId = text(form, "student_id");
+  const fixedStudentId = text(form, "fixed_student_id");
+  const studentId = fixedStudentId || text(form, "student_id");
   const name = text(form, "name");
+  const redirectTo = text(form, "redirect_to");
   if (!studentId) return { error: "Select a student." };
   if (!name) return { error: "Course name is required." };
 
@@ -50,6 +52,10 @@ export async function createCourse(
   if (error) return { error: error.message };
 
   revalidatePath("/grades");
+  if (redirectTo.startsWith("/") && !redirectTo.startsWith("//")) {
+    revalidatePath(redirectTo);
+    redirect(redirectTo);
+  }
   redirect(`/grades/${data.id}`);
 }
 
@@ -91,5 +97,6 @@ export async function recordGrade(
 
   revalidatePath("/grades");
   revalidatePath(`/grades/${courseId}`);
+  revalidatePath(`/students/${studentId}`);
   return { error: null };
 }
