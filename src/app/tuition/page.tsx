@@ -7,16 +7,11 @@ import { DataTable } from "@/components/controlpad/data-table";
 import { EmptyState } from "@/components/controlpad/empty-state";
 import { PageHeader } from "@/components/controlpad/page-header";
 import { StatusBadge } from "@/components/controlpad/status-badge";
-import { Button } from "@/components/ui/button";
 import { getCurrentProfile } from "@/lib/auth/current-profile";
 import { studentName, type Student } from "@/lib/people/people";
 import { createClient } from "@/lib/supabase/server";
 
-import { setPaymentStatus } from "./actions";
-
-// ---------------------------------------------------------------------------
-// Month helpers
-// ---------------------------------------------------------------------------
+import { PaymentToggleForm } from "./payment-toggle-form";
 
 function parseMonthParam(
   monthParam: string | undefined,
@@ -59,10 +54,6 @@ function shiftMonth(
   return { year: Math.floor(total / 12), month: (total % 12) + 1 };
 }
 
-// ---------------------------------------------------------------------------
-// Payment row type
-// ---------------------------------------------------------------------------
-
 type PaymentRow = {
   student_id: string;
   period_month: string;
@@ -75,10 +66,6 @@ type TuitionRow = {
   student: Student;
   payment: PaymentRow | null;
 };
-
-// ---------------------------------------------------------------------------
-// Page
-// ---------------------------------------------------------------------------
 
 export default async function TuitionPage({
   searchParams,
@@ -142,10 +129,6 @@ export default async function TuitionPage({
     student: s,
     payment: paymentMap.get(s.id) ?? null,
   }));
-
-  // ---------------------------------------------------------------------------
-  // Admin view
-  // ---------------------------------------------------------------------------
 
   if (profile.role === "admin") {
     const prevMonth = shiftMonth(year, month, -1);
@@ -211,6 +194,7 @@ export default async function TuitionPage({
               {
                 key: "fee",
                 header: "Monthly fee",
+                // Amount deferred — will be populated by Stripe in a later phase
                 cell: () => <span className="text-muted-foreground">—</span>,
               },
               {
@@ -228,24 +212,13 @@ export default async function TuitionPage({
               {
                 key: "action",
                 header: "Action",
-                cell: (row) => {
-                  const isPaid = row.payment?.status === "paid";
-                  const newStatus = isPaid ? "unpaid" : "paid";
-                  const label = isPaid ? "Mark unpaid" : "Mark paid";
-                  const action = setPaymentStatus.bind(
-                    null,
-                    row.student.id,
-                    periodMonthStr,
-                  ) as unknown as (formData: FormData) => Promise<void>;
-                  return (
-                    <form action={action}>
-                      <input type="hidden" name="newStatus" value={newStatus} />
-                      <Button type="submit" size="sm" variant="outline">
-                        {label}
-                      </Button>
-                    </form>
-                  );
-                },
+                cell: (row) => (
+                  <PaymentToggleForm
+                    studentId={row.student.id}
+                    periodMonth={periodMonthStr}
+                    currentStatus={row.payment?.status === "paid" ? "paid" : "unpaid"}
+                  />
+                ),
               },
             ]}
           />
@@ -253,10 +226,6 @@ export default async function TuitionPage({
       </AppShell>
     );
   }
-
-  // ---------------------------------------------------------------------------
-  // Parent view (read-only, current month only)
-  // ---------------------------------------------------------------------------
 
   return (
     <AppShell fullName={profile.fullName} role={profile.role}>

@@ -8,6 +8,7 @@ import { createClient } from "@/lib/supabase/server";
 export async function setPaymentStatus(
   studentId: string,
   periodMonth: string,
+  _prevState: { error: string } | undefined,
   formData: FormData,
 ): Promise<{ error: string } | undefined> {
   const profile = await requireRole(["admin"]);
