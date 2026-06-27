@@ -101,6 +101,10 @@ export default async function TuitionPage({
   const isCurrentOrFuture =
     year > currentYear || (year === currentYear && month >= currentMonth);
 
+  // Current month is always derived from the real current date (not the URL param).
+  // Used for the parent view so parents cannot query arbitrary months.
+  const currentPeriodMonth = toPeriodMonth(currentYear, currentMonth);
+
   const supabase = await createClient();
 
   // Fetch active students (RLS filters to linked children for parents)
@@ -115,14 +119,18 @@ export default async function TuitionPage({
   const students = (studentData ?? []) as Student[];
   const studentIds = students.map((s) => s.id);
 
-  // Fetch payment rows for the selected month
+  // Admin fetches payments for the selected (URL-param) month.
+  // Parent fetches payments for the current month only — URL param is ignored.
+  const fetchPeriodMonth =
+    profile.role === "admin" ? periodMonthStr : currentPeriodMonth;
+
   const { data: paymentData } =
     studentIds.length > 0
       ? await supabase
           .from("payments")
           .select("student_id, period_month, status, paid_at, recorded_by")
           .in("student_id", studentIds)
-          .eq("period_month", periodMonthStr)
+          .eq("period_month", fetchPeriodMonth)
       : { data: [] };
 
   const paymentMap = new Map<string, PaymentRow>();
