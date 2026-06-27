@@ -184,14 +184,11 @@ as $$ select role from public.profiles where id = auth.uid() $$;
 **Parent "own children" check** (reusable predicate):
 
 ```sql
--- True when the row's student belongs to a guardian linked to the current user
-exists (
-  select 1
-  from student_guardians sg
-  join guardians g on g.id = sg.guardian_id
-  where sg.student_id = <table>.student_id
-    and g.user_id = auth.uid()
-)
+-- True when the row's student belongs to a guardian linked to the current user.
+-- Implement this as a SECURITY DEFINER helper, not inline in each RLS policy:
+-- parent policies on other tables must not directly query student_guardians,
+-- because student_guardians has its own RLS policy and Postgres will recurse.
+public.parent_has_student(<table>.student_id)
 ```
 
 **Example policies (pattern to repeat):**
