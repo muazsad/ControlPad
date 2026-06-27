@@ -1,0 +1,21 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "crons": [
+    {
+      "path": "/api/cron/attendance-absence",
+      "schedule": "5 15 * * 1-5"
+    },
+    {
+      "path": "/api/cron/tardy-threshold",
+      "schedule": "30 20 * * 1-5"
+    },
+    {
+      "path": "/api/cron/quran-slip",
+      "schedule": "0 15 * * 1-5"
+    },
+    {
+      "path": "/api/cron/admin-digest",
+      "schedule": "5 19 * * 1-5"
+    }
+  ]
+}
