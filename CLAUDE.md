@@ -55,3 +55,43 @@ You *can* tell them exactly which keys to copy and where to paste them (`docs/SE
 ## When unsure
 
 Ask a focused question rather than guessing on schema, role permissions, or money/account actions. If a change affects scope, note that `docs/PROJECT_PLAN.md` should be updated to match.
+
+## Design System (established in Phase 1 — follow this in every phase)
+
+The UI uses **shadcn/ui + Tailwind**. Do not introduce any other component library.
+All reusable components live in `components/ui/` (shadcn primitives) and
+`components/app/` (project-specific, e.g. StatusBadge, SummaryCard, DataTable).
+
+### Brand colors (CSS variables in globals.css)
+- Primary navy:   `--color-primary`   (~#1E2A5E)  — sidebar, nav, primary buttons, headings
+- Accent gold:    `--color-accent`    (~#C8922E)  — active nav item highlight, secondary CTA only
+- Background:     warm off-white (`--color-background`) — NOT pure white
+- Foreground:     near-navy charcoal (`--color-foreground`)
+
+### Status color scale (functional — keep clearly distinct from brand gold)
+Always use these for data status, never improvise new colors:
+- **Success / green**  (`--color-success`,  ~#16A34A) — Present, Paid, grade above floor, on-track
+- **Warning / orange** (`--color-warning`,  ~#EA8A00) — Tardy, approaching threshold, due soon
+- **Danger / red**     (`--color-danger`,   ~#DC2626) — Absent, Overdue, below grade floor, slipping
+- **Neutral / slate**  (`--color-neutral`)            — Excused, no-data, secondary states
+
+### Reusable components (always use these, never re-implement inline)
+- `<StatusBadge status="present|tardy|absent|excused|paid|overdue|on-track|slipping|..." />`
+- `<SummaryCard title count icon href />` — the dashboard summary cards
+- `<DataTable />` — all tabular data (grades, attendance, payments) goes through this
+- Skeleton loaders for every data-fetching page/component
+- Empty states: friendly message + icon, never a blank space
+
+### App shell
+- Admin/Moderator: left sidebar (collapsible on mobile) — Dashboard, Students, Grades,
+  Attendance, Quran, Tuition, Settings. Settings and Tuition visible to Admin only.
+- Parent: simplified top-bar layout, larger text, minimal options. No sidebar.
+- Top bar: wordmark left, user name + role + avatar dropdown (sign out) right.
+
+### Patterns
+- Cards: `rounded-lg`, subtle border, soft shadow, consistent padding
+- New pages: always use the established app shell layout, never a blank page
+- Data tables: use `<DataTable>` wrapper, status columns always use `<StatusBadge>`
+- Errors: inline field errors + sonner toast for action failures
+- Loading: skeleton, never a spinner on a full page
+- Do not polish empty states heavily — they will be replaced by real data soon

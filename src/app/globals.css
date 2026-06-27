@@ -1,26 +1,178 @@
 @import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
+@custom-variant dark (&:is(.dark *));
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
+  --font-sans: var(--font-sans);
   --font-mono: var(--font-geist-mono);
+  --font-heading: var(--font-sans);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-brand-gold: var(--brand-gold);
+  --color-brand-gold-foreground: var(--brand-gold-foreground);
+  --color-status-success: var(--status-success);
+  --color-status-success-foreground: var(--status-success-foreground);
+  --color-status-success-soft: var(--status-success-soft);
+  --color-status-warning: var(--status-warning);
+  --color-status-warning-foreground: var(--status-warning-foreground);
+  --color-status-warning-soft: var(--status-warning-soft);
+  --color-status-danger: var(--status-danger);
+  --color-status-danger-foreground: var(--status-danger-foreground);
+  --color-status-danger-soft: var(--status-danger-soft);
+  --color-status-neutral: var(--status-neutral);
+  --color-status-neutral-foreground: var(--status-neutral-foreground);
+  --color-status-neutral-soft: var(--status-neutral-soft);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+:root {
+  --background: #fafaf7;
+  --foreground: #111936;
+  --card: #fffffc;
+  --card-foreground: #111936;
+  --popover: #fffffc;
+  --popover-foreground: #111936;
+  --primary: #1e2a5e;
+  --primary-foreground: #ffffff;
+  --secondary: #eef0e8;
+  --secondary-foreground: #1e2a5e;
+  --muted: #f0f1ea;
+  --muted-foreground: #667085;
+  --accent: #f5ead4;
+  --accent-foreground: #1e2a5e;
+  --destructive: #dc2626;
+  --border: #dedfd5;
+  --input: #d7d9cf;
+  --ring: #c8922e;
+  --brand-gold: #c8922e;
+  --brand-gold-foreground: #1b2348;
+  --status-success: #16a34a;
+  --status-success-foreground: #ffffff;
+  --status-success-soft: #dcfce7;
+  --status-warning: #ea8a00;
+  --status-warning-foreground: #1f1300;
+  --status-warning-soft: #fff3d6;
+  --status-danger: #dc2626;
+  --status-danger-foreground: #ffffff;
+  --status-danger-soft: #fee2e2;
+  --status-neutral: #64748b;
+  --status-neutral-foreground: #ffffff;
+  --status-neutral-soft: #e2e8f0;
+  --chart-1: #1e2a5e;
+  --chart-2: #c8922e;
+  --chart-3: #16a34a;
+  --chart-4: #ea8a00;
+  --chart-5: #dc2626;
+  --radius: 0.625rem;
+  --sidebar: #1e2a5e;
+  --sidebar-foreground: #f8fafc;
+  --sidebar-primary: #c8922e;
+  --sidebar-primary-foreground: #1b2348;
+  --sidebar-accent: rgb(255 255 255 / 10%);
+  --sidebar-accent-foreground: #ffffff;
+  --sidebar-border: rgb(255 255 255 / 14%);
+  --sidebar-ring: #c8922e;
+}
+
+.dark {
+  --background: #111936;
+  --foreground: #f8fafc;
+  --card: #172044;
+  --card-foreground: #f8fafc;
+  --popover: #172044;
+  --popover-foreground: #f8fafc;
+  --primary: #f8fafc;
+  --primary-foreground: #1e2a5e;
+  --secondary: #24305f;
+  --secondary-foreground: #f8fafc;
+  --muted: #24305f;
+  --muted-foreground: #cbd5e1;
+  --accent: #3b3151;
+  --accent-foreground: #f8fafc;
+  --destructive: #f87171;
+  --border: rgb(255 255 255 / 12%);
+  --input: rgb(255 255 255 / 16%);
+  --ring: #e3b45c;
+  --brand-gold: #e3b45c;
+  --brand-gold-foreground: #111936;
+  --status-success: #4ade80;
+  --status-success-foreground: #052e16;
+  --status-success-soft: #103d27;
+  --status-warning: #f59e0b;
+  --status-warning-foreground: #1f1300;
+  --status-warning-soft: #4a3108;
+  --status-danger: #f87171;
+  --status-danger-foreground: #450a0a;
+  --status-danger-soft: #4c1515;
+  --status-neutral: #94a3b8;
+  --status-neutral-foreground: #0f172a;
+  --status-neutral-soft: #263244;
+  --chart-1: #e3b45c;
+  --chart-2: #93c5fd;
+  --chart-3: #4ade80;
+  --chart-4: #f59e0b;
+  --chart-5: #f87171;
+  --sidebar: #101733;
+  --sidebar-foreground: #f8fafc;
+  --sidebar-primary: #e3b45c;
+  --sidebar-primary-foreground: #111936;
+  --sidebar-accent: rgb(255 255 255 / 10%);
+  --sidebar-accent-foreground: #ffffff;
+  --sidebar-border: rgb(255 255 255 / 12%);
+  --sidebar-ring: #e3b45c;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
   }
-}
-
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  body {
+    @apply bg-background text-foreground;
+  }
+  button:not(:disabled), [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+  html {
+    @apply font-sans;
+  }
+  h1, h2, h3, h4 {
+    @apply text-primary;
+  }
 }
