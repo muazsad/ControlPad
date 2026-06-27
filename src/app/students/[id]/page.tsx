@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, BookOpen, Pencil, Plus } from "lucide-react";
+import { ArrowLeft, BookOpen, Pencil, Plus, Star } from "lucide-react";
 
 import { AppShell } from "@/components/controlpad/app-shell";
 import { EmptyState } from "@/components/controlpad/empty-state";
@@ -20,6 +20,13 @@ import {
   type Guardian,
   type Student,
 } from "@/lib/people/people";
+import {
+  avgGradeScore,
+  quranScore,
+  attendanceRate,
+  globalPerformance,
+  performanceTone,
+} from "@/lib/people/performance";
 import { createClient } from "@/lib/supabase/server";
 import { CourseForm } from "@/app/grades/course-form";
 import { formatGrade, gradeTone, latestGrade } from "@/app/grades/grade-display";
@@ -43,6 +50,49 @@ type CourseRow = {
   student_id: string;
   grades: GradeSnapshot[];
 };
+
+type QuranEntry = { date: string; lines_memorized: number };
+type AttendanceRecord = { status: "present" | "tardy" | "absent" | "excused" };
+
+const TREND_LABEL: Record<string, string> = {
+  improving: "Improving",
+  steady: "Steady",
+  slowing: "Slowing",
+  stalled: "Stalled",
+};
+
+const TREND_CLASS: Record<string, string> = {
+  improving: "text-[var(--color-success)]",
+  steady: "text-muted-foreground",
+  slowing: "text-[var(--color-warning)]",
+  stalled: "text-[var(--color-danger)]",
+};
+
+function StatTile({
+  label,
+  value,
+  sub,
+  subClass,
+}: {
+  label: string;
+  value: string;
+  sub?: string;
+  subClass?: string;
+}) {
+  return (
+    <div className="flex flex-col gap-1 rounded-lg border bg-card px-4 py-3">
+      <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+        {label}
+      </span>
+      <span className="text-2xl font-semibold tabular-nums">{value}</span>
+      {sub && (
+        <span className={`text-xs font-medium ${subClass ?? "text-muted-foreground"}`}>
+          {sub}
+        </span>
+      )}
+    </div>
+  );
+}
 
 function Detail({ label, value }: { label: string; value: string | null }) {
   return (
@@ -77,10 +127,16 @@ export default async function StudentDetailPage({
   if (!student) notFound();
   const s = student as Student;
 
+  const thirtyDaysAgo = new Date();
+  thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+  const cutoff = thirtyDaysAgo.toISOString().slice(0, 10);
+
   const [
     { data: links },
     { data: courseData },
     { data: settingsData },
+    { data: quranData },
+    { data: attendanceData },
   ] = await Promise.all([
     supabase
       .from("student_guardians")
@@ -98,6 +154,17 @@ export default async function StudentDetailPage({
         ascending: false,
       }),
     supabase.from("settings").select("grade_floor").eq("id", 1).single(),
+    supabase
+      .from("quran_progress")
+      .select("date, lines_memorized")
+      .eq("student_id", id)
+      .gte("date", cutoff)
+      .order("date", { ascending: false }),
+    supabase
+      .from("attendance")
+      .select("status")
+      .eq("student_id", id)
+      .gte("date", cutoff),
   ]);
 
   const linked: LinkedGuardian[] = (links ?? []).map((row) => {
@@ -107,6 +174,23 @@ export default async function StudentDetailPage({
   const courses = (courseData ?? []) as unknown as CourseRow[];
   const gradeFloor =
     settingsData?.grade_floor == null ? null : Number(settingsData.grade_floor);
+
+  // Compute performance metrics
+  const latestGradesPerCourse = courses
+    .map((c) => latestGrade(c.grades))
+    .filter((g): g is NonNullable<typeof g> => g !== null)
+    .map((g) => Number(g.grade_value));
+  const gradeAvg = avgGradeScore(latestGradesPerCourse);
+
+  const quranEntries = (quranData ?? []) as QuranEntry[];
+  const quranResult = quranScore(quranEntries);
+  const totalQuranLines = quranEntries.reduce((s, e) => s + e.lines_memorized, 0);
+
+  const attendanceRecords = (attendanceData ?? []) as AttendanceRecord[];
+  const attRate = attendanceRate(attendanceRecords);
+
+  const globalScore = globalPerformance(gradeAvg, quranResult.score);
+  const globalTone = performanceTone(globalScore);
 
   // Only admins can create links, so only they need the candidate list.
   let available: Guardian[] = [];
@@ -143,6 +227,46 @@ export default async function StudentDetailPage({
             </Button>
           }
         />
+
+        {/* Performance snapshot */}
+        <Card className="border shadow-sm">
+          <CardHeader className="flex-row items-center justify-between gap-3 space-y-0 pb-3">
+            <CardTitle className="flex items-center gap-2">
+              <Star className="size-5" aria-hidden="true" />
+              Performance (last 30 days)
+            </CardTitle>
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-muted-foreground">Global</span>
+              <StatusBadge
+                status={globalScore !== null ? `${Math.round(globalScore)}%` : "No data"}
+                tone={globalTone}
+              />
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="grid gap-3 sm:grid-cols-3">
+              <StatTile
+                label="Grade avg"
+                value={gradeAvg !== null ? `${Math.round(gradeAvg)}%` : "—"}
+                sub={gradeAvg !== null ? `${latestGradesPerCourse.length} course${latestGradesPerCourse.length !== 1 ? "s" : ""}` : "No grades yet"}
+              />
+              <StatTile
+                label="Quran lines"
+                value={totalQuranLines > 0 ? String(totalQuranLines) : "—"}
+                sub={TREND_LABEL[quranResult.trend]}
+                subClass={TREND_CLASS[quranResult.trend]}
+              />
+              <StatTile
+                label="Attendance rate"
+                value={attendanceRecords.length > 0 ? `${Math.round(attRate)}%` : "—"}
+                sub={attendanceRecords.length > 0 ? `${attendanceRecords.length} session${attendanceRecords.length !== 1 ? "s" : ""}` : "No records"}
+              />
+            </div>
+            <p className="mt-3 text-xs text-muted-foreground">
+              Global score = grades + Quran only (equal weight). Attendance shown for reference.
+            </p>
+          </CardContent>
+        </Card>
 
         <Card className="border shadow-sm">
           <CardHeader className="flex-row items-center justify-between gap-3 space-y-0">
