@@ -1,69 +1,25 @@
 import Link from "next/link";
-import { BookOpen, GraduationCap, Plus } from "lucide-react";
+import { AlertTriangle, GraduationCap } from "lucide-react";
 
 import { AppShell } from "@/components/controlpad/app-shell";
 import { DataTable } from "@/components/controlpad/data-table";
 import { EmptyState } from "@/components/controlpad/empty-state";
 import { PageHeader } from "@/components/controlpad/page-header";
 import { StatusBadge } from "@/components/controlpad/status-badge";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { getCurrentProfile } from "@/lib/auth/current-profile";
-import { studentName, type Student } from "@/lib/people/people";
+import { formatGrade, gradeTone } from "./grade-display";
+import { getAllStudentMetrics } from "@/lib/people/student-metrics";
 import { createClient } from "@/lib/supabase/server";
-
-import { CourseForm } from "./course-form";
-import { formatGrade, gradeTone, latestGrade } from "./grade-display";
-
-type GradeSnapshot = {
-  id: string;
-  grade_value: number;
-  recorded_at: string;
-  note: string | null;
-};
-
-type CourseRow = {
-  id: string;
-  name: string;
-  gcvs_course_code: string | null;
-  created_at: string;
-  students: Pick<Student, "id" | "first_name" | "last_name" | "grade_level">;
-  grades: GradeSnapshot[];
-};
 
 export default async function GradesPage() {
   const profile = await getCurrentProfile();
-  const canManage = profile.role === "admin" || profile.role === "moderator";
   const supabase = await createClient();
 
-  const [
-    { data: courseData, error },
-    { data: studentData },
-    { data: settingsData },
-  ] = await Promise.all([
-    supabase
-      .from("courses")
-      .select(
-        "id, name, gcvs_course_code, created_at, students(id, first_name, last_name, grade_level), grades(id, grade_value, recorded_at, note)",
-      )
-      .order("name", { ascending: true })
-      .order("recorded_at", {
-        referencedTable: "grades",
-        ascending: false,
-      }),
-    canManage
-      ? supabase
-          .from("students")
-          .select(
-            "id, first_name, last_name, date_of_birth, grade_level, enrollment_status, gcvs_reference, created_at, updated_at",
-          )
-          .eq("enrollment_status", "active")
-          .order("last_name", { ascending: true })
-      : Promise.resolve({ data: null }),
+  const [students, { data: settingsData }] = await Promise.all([
+    getAllStudentMetrics(),
     supabase.from("settings").select("grade_floor").eq("id", 1).single(),
   ]);
 
-  const courses = (courseData ?? []) as unknown as CourseRow[];
-  const students = (studentData ?? []) as Student[];
   const gradeFloor =
     settingsData?.grade_floor == null ? null : Number(settingsData.grade_floor);
 
@@ -72,106 +28,86 @@ export default async function GradesPage() {
       <div className="mx-auto max-w-6xl space-y-6">
         <PageHeader
           title="Grades"
-          description={
-            canManage
-              ? "Add GCVS courses and record grade snapshots. Each saved grade keeps history."
-              : "Current grades and grade history for your linked children."
-          }
+          description="Grade averages and performance across all students. Click a student to view full course history."
         />
 
-        {canManage ? (
-          <Card className="border shadow-sm">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Plus className="size-5" aria-hidden="true" />
-                Add course
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <CourseForm students={students} />
-            </CardContent>
-          </Card>
-        ) : null}
-
-        {error ? (
-          <EmptyState
-            title="Could not load grades"
-            description={error.message}
-            icon={GraduationCap}
-          />
-        ) : (
-          <DataTable
-            data={courses}
-            getRowKey={(row) => row.id}
-            empty={
-              <EmptyState
-                title={canManage ? "No courses yet" : "No grades available"}
-                description={
-                  canManage
-                    ? "Add a student's first GCVS course to start recording grades."
-                    : "No course grades are linked to your account yet."
-                }
-                icon={BookOpen}
-              />
-            }
-            columns={[
-              {
-                key: "course",
-                header: "Course",
-                cell: (row) => (
-                  <div>
-                    <Link
-                      href={`/grades/${row.id}`}
-                      className="font-medium text-primary hover:underline"
-                    >
-                      {row.name}
-                    </Link>
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      {row.gcvs_course_code ?? "No GCVS code"}
-                    </p>
-                  </div>
-                ),
-              },
-              {
-                key: "student",
-                header: "Student",
-                cell: (row) => (
-                  <div>
-                    <p className="font-medium">{studentName(row.students)}</p>
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      {row.students.grade_level ?? "Grade not set"}
-                    </p>
-                  </div>
-                ),
-              },
-              {
-                key: "latest",
-                header: "Latest grade",
-                cell: (row) => {
-                  const latest = latestGrade(row.grades);
-                  const value = latest ? Number(latest.grade_value) : null;
-                  return (
+        <DataTable
+          data={students}
+          getRowKey={(row) => row.id}
+          empty={
+            <EmptyState
+              title="No students found"
+              description="No student records are linked to your account yet."
+              icon={GraduationCap}
+            />
+          }
+          columns={[
+            {
+              key: "student",
+              header: "Student",
+              cell: (row) => (
+                <div>
+                  <Link
+                    href={`/students/${row.id}`}
+                    className="font-medium text-primary hover:underline"
+                  >
+                    {row.name}
+                  </Link>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {row.grade_level ?? "Grade not set"}
+                  </p>
+                </div>
+              ),
+            },
+            {
+              key: "avg_grade",
+              header: "Avg grade",
+              cell: (row) => {
+                const belowFloor =
+                  gradeFloor !== null &&
+                  row.latestGradeValues.some((v) => v < gradeFloor);
+                return (
+                  <div className="flex items-center gap-1.5">
                     <StatusBadge
-                      status={formatGrade(value)}
-                      tone={gradeTone(value, gradeFloor)}
+                      status={formatGrade(row.gradeScore)}
+                      tone={gradeTone(row.gradeScore, gradeFloor)}
                     />
-                  );
-                },
+                    {belowFloor && (
+                      <AlertTriangle
+                        className="size-3.5 text-[var(--color-warning)]"
+                        aria-label="One or more courses below grade floor"
+                      />
+                    )}
+                  </div>
+                );
               },
-              {
-                key: "recorded",
-                header: "Recorded",
-                cell: (row) => {
-                  const latest = latestGrade(row.grades);
-                  return latest
-                    ? new Date(latest.recorded_at).toLocaleDateString()
-                    : "—";
-                },
-                className: "text-muted-foreground",
-              },
-            ]}
-          />
-        )}
+            },
+            {
+              key: "courses",
+              header: "Courses",
+              cell: (row) => (
+                <span className="tabular-nums text-sm">
+                  {row.courseCount}
+                </span>
+              ),
+              className: "text-muted-foreground",
+            },
+            {
+              key: "performance",
+              header: "Performance",
+              cell: (row) => (
+                <StatusBadge
+                  status={
+                    row.globalScore !== null
+                      ? `${Math.round(row.globalScore)}%`
+                      : "No data"
+                  }
+                  tone={row.globalTone}
+                />
+              ),
+            },
+          ]}
+        />
       </div>
     </AppShell>
   );
