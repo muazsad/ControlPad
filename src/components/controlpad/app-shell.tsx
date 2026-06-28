@@ -11,6 +11,7 @@ import {
   GraduationCap,
   Settings,
   ShieldCheck,
+  Trophy,
   Users,
 } from "lucide-react";
 import type { ReactNode } from "react";
@@ -39,6 +40,7 @@ const operationalNav: NavItem[] = [
   { href: "/students", label: "Students", icon: Users },
   { href: "/guardians", label: "Guardians", icon: Contact },
   { href: "/grades", label: "Grades", icon: GraduationCap },
+  { href: "/top-performers", label: "Top Performers", icon: Trophy },
   { href: "/attendance", label: "Attendance", icon: CalendarDays },
   { href: "/quran", label: "Quran", icon: BookOpen },
 ];
