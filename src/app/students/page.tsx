@@ -8,28 +8,16 @@ import { PageHeader } from "@/components/controlpad/page-header";
 import { StatusBadge } from "@/components/controlpad/status-badge";
 import { Button } from "@/components/ui/button";
 import { getCurrentProfile } from "@/lib/auth/current-profile";
-import {
-  enrollmentBadgeTone,
-  studentName,
-  type Student,
-} from "@/lib/people/people";
-import { createClient } from "@/lib/supabase/server";
+import { enrollmentBadgeTone } from "@/lib/people/people";
+import { getAllStudentMetrics } from "@/lib/people/student-metrics";
 
 export default async function StudentsPage() {
   const profile = await getCurrentProfile();
   const canManage = profile.role === "admin" || profile.role === "moderator";
 
-  const supabase = await createClient();
   // RLS scopes this automatically: staff see all students, a parent sees only
   // students linked to their guardian record.
-  const { data, error } = await supabase
-    .from("students")
-    .select(
-      "id, first_name, last_name, date_of_birth, grade_level, enrollment_status, gcvs_reference, created_at, updated_at",
-    )
-    .order("last_name", { ascending: true });
-
-  const students = (data ?? []) as Student[];
+  const students = await getAllStudentMetrics();
 
   return (
     <AppShell fullName={profile.fullName} role={profile.role}>
@@ -53,68 +41,68 @@ export default async function StudentsPage() {
           }
         />
 
-        {error ? (
-          <EmptyState
-            title="Could not load students"
-            description={error.message}
-            icon={Users}
-          />
-        ) : (
-          <DataTable
-            data={students}
-            getRowKey={(row) => row.id}
-            empty={
-              <EmptyState
-                title={canManage ? "No students yet" : "No linked children"}
-                description={
-                  canManage
-                    ? "Add your first student to start tracking grades, attendance, and Quran progress."
-                    : "An administrator has not linked any students to your account yet."
-                }
-                icon={Users}
-              />
-            }
-            columns={[
-              {
-                key: "name",
-                header: "Name",
-                cell: (row) =>
-                  canManage ? (
-                    <Link
-                      href={`/students/${row.id}`}
-                      className="font-medium text-primary hover:underline"
-                    >
-                      {studentName(row)}
-                    </Link>
-                  ) : (
-                    <span className="font-medium">{studentName(row)}</span>
-                  ),
-              },
-              {
-                key: "grade",
-                header: "Grade",
-                cell: (row) => row.grade_level ?? "—",
-              },
-              {
-                key: "status",
-                header: "Enrollment",
-                cell: (row) => (
-                  <StatusBadge
-                    status={row.enrollment_status}
-                    tone={enrollmentBadgeTone(row.enrollment_status)}
-                    className="capitalize"
-                  />
+        <DataTable
+          data={students}
+          getRowKey={(row) => row.id}
+          empty={
+            <EmptyState
+              title={canManage ? "No students yet" : "No linked children"}
+              description={
+                canManage
+                  ? "Add your first student to start tracking grades, attendance, and Quran progress."
+                  : "An administrator has not linked any students to your account yet."
+              }
+              icon={Users}
+            />
+          }
+          columns={[
+            {
+              key: "name",
+              header: "Name",
+              cell: (row) =>
+                canManage ? (
+                  <Link
+                    href={`/students/${row.id}`}
+                    className="font-medium text-primary hover:underline"
+                  >
+                    {row.name}
+                  </Link>
+                ) : (
+                  <span className="font-medium">{row.name}</span>
                 ),
-              },
-              {
-                key: "dob",
-                header: "Date of birth",
-                cell: (row) => row.date_of_birth ?? "—",
-                className: "text-muted-foreground",
-              },
-            ]}
-          />
-        )}
+            },
+            {
+              key: "grade",
+              header: "Grade",
+              cell: (row) => row.grade_level ?? "—",
+            },
+            {
+              key: "status",
+              header: "Enrollment",
+              cell: (row) => (
+                <StatusBadge
+                  status={row.enrollment_status}
+                  tone={enrollmentBadgeTone(row.enrollment_status)}
+                  className="capitalize"
+                />
+              ),
+            },
+            {
+              key: "performance",
+              header: "Performance",
+              cell: (row) => (
+                <StatusBadge
+                  status={
+                    row.globalScore !== null
+                      ? `${Math.round(row.globalScore)}%`
+                      : "No data"
+                  }
+                  tone={row.globalTone}
+                />
+              ),
+            },
+          ]}
+        />
       </div>
     </AppShell>
   );
