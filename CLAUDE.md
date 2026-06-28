@@ -84,9 +84,23 @@ Always use these for data status, never improvise new colors:
 
 ### App shell
 - Admin/Moderator: left sidebar (collapsible on mobile) — Dashboard, Students, Grades,
-  Attendance, Quran, Tuition, Settings. Settings and Tuition visible to Admin only.
+  Top Performers, Attendance, Quran, Tuition, Settings. Settings and Tuition visible to Admin only.
 - Parent: simplified top-bar layout, larger text, minimal options. No sidebar.
 - Top bar: wordmark left, user name + role + avatar dropdown (sign out) right.
+
+## Performance metric architecture
+
+### Global performance (shown on Students list, Grades tab, student profile)
+- **Definition:** equal-weight average of `gradeScore` (0–100) and `quranScore` (0–100). Attendance is intentionally excluded.
+- **Computed by:** `globalPerformance(gradeScore, quranScore)` in `src/lib/people/performance.ts`. All tunable constants (window sizes, tone thresholds) live at the top of that file — never hardcode them elsewhere.
+- **Displayed as:** `<StatusBadge>` coloured by `performanceTone(score)` → success ≥ 75, warning ≥ 50, danger < 50, neutral for null.
+- **Data source:** `getAllStudentMetrics()` in `src/lib/people/student-metrics.ts` — single Supabase query via nested `.select()` relations (no N+1). Always reuse this helper; do not write ad-hoc per-student loops.
+
+### Top Performers leaderboard (`/top-performers`)
+- **Separate metric.** Uses `compositeScore(weights, g, q, a)` from `performance.ts` — a weight-normalised blend of all three factors including attendance.
+- **Attendance is used ONLY here.** It never enters the global metric on other tabs.
+- **Weights are tab-local:** stored in React state + `localStorage["leaderboard-weights"]`. They have zero effect on the global metric shown anywhere else.
+- Do not copy this weighting logic to other pages. If a new page needs a combined score, use `globalPerformance()` unless the spec explicitly says otherwise.
 
 ### Patterns
 - Cards: `rounded-lg`, subtle border, soft shadow, consistent padding
