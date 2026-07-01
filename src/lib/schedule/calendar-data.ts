@@ -26,6 +26,33 @@ type SpecialDayRow = {
   note: string | null;
 };
 
+type SupabaseLikeError = {
+  code?: string;
+  message?: string;
+};
+
+function defaultCalendarConfig(): SchoolCalendarConfig {
+  return {
+    weeklyPattern: DEFAULT_WEEKLY_PATTERN,
+    breaks: [],
+    specialDays: [],
+  };
+}
+
+export function isMissingSchoolCalendarTableError(
+  error: SupabaseLikeError | null | undefined,
+): boolean {
+  const message = error?.message ?? "";
+  return (
+    error?.code === "PGRST205" ||
+    error?.code === "42P01" ||
+    (/Could not find the table/i.test(message) &&
+      /school_(weekly_patterns|breaks|special_days)/i.test(message)) ||
+    (/relation .* does not exist/i.test(message) &&
+      /school_(weekly_patterns|breaks|special_days)/i.test(message))
+  );
+}
+
 async function loadSchoolCalendar(
   supabase: CalendarClient,
 ): Promise<SchoolCalendarConfig> {
@@ -44,6 +71,20 @@ async function loadSchoolCalendar(
       .select("date, type, start_time, end_time, note")
       .order("date", { ascending: true }),
   ]);
+
+  const errors = [
+    weeklyResult.error,
+    breaksResult.error,
+    specialDaysResult.error,
+  ].filter(Boolean);
+
+  if (errors.some(isMissingSchoolCalendarTableError)) {
+    const unexpectedError = errors.find(
+      (error) => !isMissingSchoolCalendarTableError(error),
+    );
+    if (unexpectedError) throw new Error(unexpectedError.message);
+    return defaultCalendarConfig();
+  }
 
   if (weeklyResult.error) throw new Error(weeklyResult.error.message);
   if (breaksResult.error) throw new Error(breaksResult.error.message);
