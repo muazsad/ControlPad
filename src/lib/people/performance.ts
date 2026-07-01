@@ -6,6 +6,12 @@ const QURAN_RECENT_WINDOW_DAYS = 14;
 /** Days in the "prior" Quran window used for trend comparison. */
 const QURAN_PRIOR_WINDOW_DAYS = 14;
 
+/** Minimum graded courses required before the global metric is scored. */
+export const MIN_GRADED_COURSES_FOR_SCORE = 1;
+
+/** Minimum Quran entries required before the global metric is scored. */
+export const MIN_QURAN_ENTRIES_FOR_SCORE = 1;
+
 /**
  * Score thresholds for performanceTone().
  * ≥ SUCCESS_THRESHOLD → 'success'
@@ -29,6 +35,20 @@ export type CompositeWeights = {
   grades: number;
   quran: number;
   attendance: number;
+};
+
+export type GlobalPerformanceStatus = "scored" | "insufficient_data";
+
+export type GlobalPerformanceResult = {
+  status: GlobalPerformanceStatus;
+  score: number | null;
+};
+
+export type GlobalPerformanceInput = {
+  gradeScore: number | null;
+  quranScore: number | null;
+  gradedCourseCount?: number;
+  quranEntryCount?: number;
 };
 
 // ── Utilities ────────────────────────────────────────────────────────────────
@@ -120,16 +140,30 @@ export function attendanceRate(
  * Primary performance metric shown across all student tabs.
  * Equal-weight average of gradeScore (0–100) and quranScore (0–100).
  * Attendance is intentionally excluded here.
- * Returns null when both inputs are null (no data at all).
+ * Requires both contributing factors to have data before returning a score.
+ * A future policy could score whichever factor exists, but the current rule is
+ * intentionally conservative so missing data never behaves like a low score.
  */
-export function globalPerformance(
-  gradeScore: number | null,
-  qScore: number | null,
-): number | null {
-  if (gradeScore === null && qScore === null) return null;
-  if (gradeScore === null) return qScore;
-  if (qScore === null) return gradeScore;
-  return (gradeScore + qScore) / 2;
+export function globalPerformance({
+  gradeScore,
+  quranScore: qScore,
+  gradedCourseCount,
+  quranEntryCount,
+}: GlobalPerformanceInput): GlobalPerformanceResult {
+  const hasEnoughGrades =
+    gradedCourseCount !== undefined
+      ? gradedCourseCount >= MIN_GRADED_COURSES_FOR_SCORE
+      : gradeScore !== null;
+  const hasEnoughQuran =
+    quranEntryCount !== undefined
+      ? quranEntryCount >= MIN_QURAN_ENTRIES_FOR_SCORE
+      : qScore !== null;
+
+  if (!hasEnoughGrades || !hasEnoughQuran || gradeScore === null || qScore === null) {
+    return { status: "insufficient_data", score: null };
+  }
+
+  return { status: "scored", score: (gradeScore + qScore) / 2 };
 }
 
 /**

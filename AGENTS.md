@@ -60,64 +60,18 @@ Ask a focused question rather than guessing on schema, role permissions, or mone
 <claude-mem-context>
 # Memory Context
 
-# [ControlPad] recent context, 2026-06-26 10:39pm EDT
+# [ControlPad] recent context, 2026-07-01 5:29pm EDT
 
 Legend: 🎯session 🔴bugfix 🟣feature 🔄refactor ✅change 🔵discovery ⚖️decision 🚨security_alert 🔐security_note
 Format: ID TIME TYPE TITLE
 Fetch details: get_observations([IDs]) | Search: mem-search skill
 
-Stats: 50 obs (19,151t read) | 822,849t work | 98% savings
+Stats: 50 obs (21,945t read) | 677,103t work | 97% savings
 
 ### Jun 26, 2026
-407 12:42p 🟣 Student Server Actions Implemented with Role Guards and RLS
-408 " 🟣 StudentForm Client Component Built with useActionState
-409 " 🟣 Students List Page Implemented — Coming Soon Stub Replaced
-410 12:43p 🟣 New Student Page Created at /students/new
-411 " 🟣 StudentGuardianLinks Component Built for Detail Page
-412 " 🟣 Student Detail Page Created at /students/[id]
-413 12:44p 🟣 Task 2 Complete: Full Student CRUD and Guardian Linking
-414 " 🟣 Task 3 In Progress: Guardian management files being created
-415 12:46p 🟣 Task 3 Complete: Guardian detail page written — all guardian routes now exist
-416 12:47p 🟣 Task 4 Started: Staff/moderator account creation — actions.ts written
-417 " 🟣 Task 4: CreateModeratorForm component written with form-reset-on-success pattern
-418 " 🟣 Task 4 Complete: /staff page written — full staff management route done
-420 12:48p 🟣 Task 5: Home page being updated — imports added for real parent children data
-421 " 🟣 Task 5: ParentDashboard upgraded from stub to live data — accepts children: Student[] prop
-423 " 🟣 Task 5: seed.mjs created — idempotent seed with 4 test accounts and 2 isolated families
-422 " 🟣 Task 5: HomePage now fetches RLS-filtered children for parent role — isolation mechanism complete
-424 12:49p 🟣 Task 5 Complete, Task 6 Starting: npm run seed added to package.json; typecheck/build next
-425 12:58p 🟣 Phase 2 People & Access: All 6 tasks completed — full implementation summary
-427 " 🟣 Phase 2 production build passes — all 19 routes compile clean
-428 " 🔴 ESLint found 2 errors and 1 warning requiring fixes
-426 12:59p 🔵 TypeScript type-check passes with zero errors
-429 1:00p 🔴 ESLint errors fixed: "children" prop renamed to "students" in ParentDashboard
-430 9:06p 🔴 ESLint errors fully fixed: children prop renamed, bare anchor replaced with Link
-431 " 🟣 Phase 3 Quran/Hifz module requested with bulk entry and inactivity cron
-432 " 🔴 Phase 2 ESLint errors fully resolved — lint and build both pass clean
-433 9:07p 🔵 Existing infrastructure available for Phase 3: SMS lib, cron utils, and two cron routes already built
-434 " 🔵 Full cron pattern documented: _utils.ts, alert lib, route handler, vercel.json entry
-435 " 🔵 Alert library architecture fully documented — dependency injection pattern for testability
-436 " 🔵 Attendance bulk entry UI pattern fully documented — inline per-row forms in DataTable
-438 9:08p 🟣 Phase 5 Quran module task plan created — 5 tasks (7-11) covering full feature scope
-439 " 🟣 Task 7: logQuranLessons bulk server action created
-440 9:09p 🟣 Task 8: QuranBulkForm client component created with stale-entry highlighting
-441 9:16p 🔵 ControlPad Project Architecture and Scope Discovered
-442 9:17p 🔵 Existing Codebase State Before Tuition Feature Build
-S43 Build tuition tracking — second clarifying question: does monthly fee vary per student or is it a flat rate? (Jun 26 at 9:20 PM)
-S45 Build tuition tracking — still on third clarifying question about inline amount entry vs. separate amount management (Jun 26 at 9:21 PM)
-S46 Build tuition tracking — fourth clarifying question: SMS reminder frequency (one per month vs. weekly until paid) (Jun 26 at 9:21 PM)
-S44 Build tuition tracking — third clarifying question: should amount entry be inline when marking paid, or set separately? (Jun 26 at 9:21 PM)
-S47 Build tuition tracking — all design questions answered, now proposing admin UI implementation approach for approval (Jun 26 at 9:22 PM)
-S48 Build tuition tracking — detailed architecture proposed across 4 layers, awaiting approval before UI details (Jun 26 at 9:23 PM)
-S49 Build tuition tracking — admin UI layout and parent view fully specified, awaiting approval before coding (Jun 26 at 9:23 PM)
-S50 Build tuition tracking — cron and alert layer fully specified, awaiting final approval before coding starts (Jun 26 at 9:24 PM)
 S51 Build tuition tracking — design spec written, committed, and awaiting user review before implementation plan (Jun 26 at 9:24 PM)
-443 9:26p ⚖️ Tuition Design Spec to Be Written Before Coding
-444 " ✅ Created docs/superpowers/specs/ Directory
-445 " ✅ Tuition Design Spec Written and Committed to Docs
-446 9:27p ✅ Tuition Design Spec Committed to Branch codex/design-system-pass
-447 " 🔵 SMS and Auth Infrastructure Details Confirmed Before Implementation
-S52 Build tuition tracking — implementation starting; tasks created and first task in progress (Jun 26 at 9:29 PM)
+S52 Build tuition tracking — implementation starting; tasks created and first task in progress (Jun 26 at 9:27 PM)
+S53 ControlPad read-only recon: schema validation, routing audit, component inventory, and implementation plan for student profile + leaderboard features (Jun 26 at 9:29 PM)
 448 9:30p 🔵 DataTable and Student Type APIs Confirmed for Tuition Page Implementation
 449 9:31p 🟣 setPaymentStatus Server Action Implemented
 450 " 🟣 Tuition Page Implemented — Admin Grid with Month Navigation and Parent Read-Only View
@@ -129,6 +83,54 @@ S52 Build tuition tracking — implementation starting; tasks created and first 
 456 9:33p 🔴 Parent Month Lock Bug Fixed and Committed — sha 5516e6e
 457 " 🔴 Code Quality Review: Tuition Actions + Page — "Needs Work" Verdict with 2 Important Issues
 459 9:39p 🔴 actions.ts: _prevState param added for useActionState compatibility
+### Jun 27, 2026
+462 7:33p 🔵 ControlPad Recon: Schema, Routing, and Feature Planning
+463 " 🔵 ControlPad: Project Scope, Stack, and Data Model Overview
+464 7:34p 🔵 ControlPad: Exact Schema for grades, quran_progress, attendance — All Required Fields Confirmed Present
+465 " 🔵 ControlPad: Routing Structure, Data Fetching Pattern, and Existing Components
+S55 Create pure TypeScript performance metric utility at src/lib/people/performance.ts — completed and committed (Jun 27 at 7:36 PM)
+466 7:38p 🟣 Pure TypeScript Performance Metric Utility Module Added
+467 7:39p 🔵 Existing src/lib/people/people.ts Module Structure Confirmed
+468 " 🟣 performance.ts Written to src/lib/people/ — Full Implementation Details
+469 " ✅ performance.ts Passed TypeScript Check and Committed to main
+S54 Create src/lib/people/performance.ts — pure TypeScript performance metric utility for student grades, Quran progress, attendance, and composite scoring (Jun 27 at 7:39 PM)
+S56 Wire performance.ts utility into student detail page — add quran/attendance data fetching, compute metrics server-side, and render a Performance snapshot card (Jun 27 at 7:40 PM)
+470 7:41p 🔵 Student Detail Page Structure Examined Before Performance Integration
+471 " ✅ performance.ts Imports Added to Student Detail Page
+472 " ✅ Performance UI Scaffolding Added to Student Detail Page
+473 " ✅ Quran and Attendance Queries Added to Student Detail Page with Performance Computation
+474 7:42p 🟣 Performance Snapshot Card Rendered on Student Detail Page
+475 " ✅ Student Profile Performance Integration Committed to main
+S57 Add shared student-metrics helper and convert Grades tab from per-course form to per-student performance list (Jun 27 at 7:42 PM)
+476 7:44p 🔵 quran_progress and attendance Tables Not Found in Initial Migration
+477 " 🔵 quran_progress and attendance Tables Confirmed to Exist in Schema
+478 7:45p 🟣 student-metrics.ts Created — Single-Query All-Student Metrics Aggregator
+479 " 🔄 Grades Page Rewritten to Show Per-Student Performance Instead of Per-Course List
+480 7:46p ✅ student-metrics.ts and Grades Page Passed Type Check and Lint
+481 8:02p 🔵 Students List Page Current Structure Examined Before Performance Column Addition
+S58 Replace DOB column with Performance metric on Students list page — completed and committed (Jun 27 at 8:02 PM)
+482 8:13p 🔄 Students Page Data Layer Switched from Direct Query to getAllStudentMetrics()
+483 " 🟣 Students List Page Performance Column Added, DOB Removed, tsc and ESLint Clean
+S59 Add Top Performers leaderboard page with recharts bar chart and adjustable weighting — committed as sha 60b31b0 (Jun 27 at 8:14 PM)
+484 8:15p 🔵 AppShell Navigation Structure and Role-Based Routing Confirmed
+485 " 🔵 UI Component Inventory and Nav Active Logic Confirmed
+486 " ✅ recharts Installed as New Dependency
+S60 Top Performers page (Task 5) — complete implementation with recharts bar chart, adjustable factor weighting, localStorage persistence, production build verification, and CLAUDE.md documentation update (Jun 27 at 8:17 PM)
+### Jul 1, 2026
+487 5:08p 🔴 Global Performance Score Treats Missing Data as Zero for New Students
+488 " 🔵 Root Cause Traced: quranScore() Never Returns Null, Causing False Danger Badge
+489 " 🔵 Complete Consumer Map for globalScore/globalTone Across the Codebase
+490 5:09p 🟣 TDD RED Phase Confirmed for globalPerformance Insufficient-Data Return Type
+491 " 🔴 globalPerformance() Refactored to Return Status Object, Requiring Both Factors
+492 " 🔄 student-metrics.ts Updated to Use New globalPerformance Object API with Count-Based Gating
+493 " 🔴 All Global Badge Render Sites Updated to Show "Not enough data yet" for Insufficient-Data Students
+494 5:10p 🔴 Top Performers Leaderboard Now Excludes Insufficient-Data Students; Quote Style Normalized
+495 5:11p 🔴 All Tests Pass, Lint Clean, Build Succeeds — Insufficient-Data Fix Verified Complete
+496 " 🔵 Grade Alert System Is Separate From Global Performance Metric — No Overlap
+497 5:12p 🔵 Grade Issue Detection Refactored: summarizeGradeIssues Extracted, 5% Drop Threshold Added
+499 " 🔵 Stale Cache Hit on admin-digest.ts — Read Returns Pre-Patch Content Despite Successful Apply
+500 " 🔵 Triple-Apply Loop: Stale Cache Caused Same Patches Applied 3x and Cached Test Output Served as Fresh Results
+498 5:14p 🔵 Full Verification Passed — Build Clean After All Changes, AGENTS.md Also Modified
 
-Access 823k tokens of past work via get_observations([IDs]) or mem-search skill.
+Access 677k tokens of past work via get_observations([IDs]) or mem-search skill.
 </claude-mem-context>

@@ -6,6 +6,7 @@ import {
   attendanceRate,
   globalPerformance,
   performanceTone,
+  type GlobalPerformanceResult,
   type QuranScoreResult,
 } from "@/lib/people/performance";
 
@@ -47,7 +48,9 @@ export type StudentMetricsRow = {
   gradeScore: number | null;
   quranResult: QuranScoreResult;
   attRate: number;
+  globalPerformance: GlobalPerformanceResult;
   globalScore: number | null;
+  globalStatus: GlobalPerformanceResult["status"];
   globalTone: ReturnType<typeof performanceTone>;
 };
 
@@ -106,7 +109,13 @@ export async function getAllStudentMetrics(): Promise<StudentMetricsRow[]> {
     const gradeScore = avgGradeScore(latestGradeValues);
     const quranResult = quranScore(quranEntries);
     const attRate = attendanceRate(attendanceRecords);
-    const globalScore = globalPerformance(gradeScore, quranResult.score);
+    const globalResult = globalPerformance({
+      gradeScore,
+      quranScore: quranResult.score,
+      gradedCourseCount: latestGradeValues.length,
+      quranEntryCount: quranEntries.length,
+    });
+    const globalScore = globalResult.score;
     const globalTone = performanceTone(globalScore);
 
     return {
@@ -121,7 +130,9 @@ export async function getAllStudentMetrics(): Promise<StudentMetricsRow[]> {
       gradeScore,
       quranResult,
       attRate,
+      globalPerformance: globalResult,
       globalScore,
+      globalStatus: globalResult.status,
       globalTone,
     };
   });

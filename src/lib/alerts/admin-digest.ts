@@ -3,6 +3,8 @@ import { sendSms, type SendSmsInput, type SmsResult } from "@/lib/sms/send-sms";
 
 const SCHOOL_TIME_ZONE = "America/New_York";
 
+export const GRADE_DROP_THRESHOLD = 5;
+
 type AdminRecipient = {
   full_name: string;
   phone: string | null;
@@ -90,7 +92,7 @@ type AttendanceRow = {
   students: StudentRow | StudentRow[] | null;
 };
 
-type GradeRow = {
+export type GradeIssueRow = {
   course_id: string;
   grade_value: number | string;
   recorded_at: string;
@@ -108,6 +110,11 @@ type QuranRow = {
 
 type PaymentRow = {
   student_id: string;
+};
+
+export type GradeIssueSummary = {
+  lowGrades: LowGradeIssue[];
+  droppingGrades: DroppingGradeIssue[];
 };
 
 function firstRelated<T>(value: T | T[] | null): T | null {
@@ -187,6 +194,59 @@ function issueCount(summary: AdminDailySummary) {
     summary.quranSlippage.length +
     summary.overduePayments.length
   );
+}
+
+export function summarizeGradeIssues(
+  gradeRows: GradeIssueRow[],
+  gradeFloor: number,
+): GradeIssueSummary {
+  const latestByCourse = new Map<string, GradeIssueRow[]>();
+  for (const row of gradeRows) {
+    const entries = latestByCourse.get(row.course_id) ?? [];
+    if (entries.length < 2) {
+      entries.push(row);
+      latestByCourse.set(row.course_id, entries);
+    }
+  }
+
+  const lowGrades: LowGradeIssue[] = [];
+  const droppingGrades: DroppingGradeIssue[] = [];
+  for (const [courseId, entries] of latestByCourse.entries()) {
+    const latest = entries[0];
+    const previous = entries[1];
+    const student = firstRelated(latest.students);
+    const course = firstRelated(latest.courses);
+    if (!student || !course) continue;
+
+    const currentGrade = Number(latest.grade_value);
+    if (currentGrade < gradeFloor) {
+      lowGrades.push({
+        studentId: student.id,
+        studentName: studentName(student),
+        courseId,
+        courseName: course.name,
+        gradeValue: currentGrade,
+      });
+    }
+
+    if (previous) {
+      const previousGrade = Number(previous.grade_value);
+      const delta = currentGrade - previousGrade;
+      if (delta <= -GRADE_DROP_THRESHOLD) {
+        droppingGrades.push({
+          studentId: student.id,
+          studentName: studentName(student),
+          courseId,
+          courseName: course.name,
+          currentGrade,
+          previousGrade,
+          delta,
+        });
+      }
+    }
+  }
+
+  return { lowGrades, droppingGrades };
 }
 
 function namesForDigest(summary: AdminDailySummary) {
@@ -276,51 +336,10 @@ export function createSupabaseAdminDigestDatabase(): AdminDigestDatabase {
         })
         .filter((issue): issue is AttendanceIssue => Boolean(issue));
 
-      const latestByCourse = new Map<string, GradeRow[]>();
-      for (const row of (gradesResult.data ?? []) as GradeRow[]) {
-        const entries = latestByCourse.get(row.course_id) ?? [];
-        if (entries.length < 2) {
-          entries.push(row);
-          latestByCourse.set(row.course_id, entries);
-        }
-      }
-
-      const lowGrades: LowGradeIssue[] = [];
-      const droppingGrades: DroppingGradeIssue[] = [];
-      for (const [courseId, entries] of latestByCourse.entries()) {
-        const latest = entries[0];
-        const previous = entries[1];
-        const student = firstRelated(latest.students);
-        const course = firstRelated(latest.courses);
-        if (!student || !course) continue;
-
-        const currentGrade = Number(latest.grade_value);
-        if (currentGrade < settings.gradeFloor) {
-          lowGrades.push({
-            studentId: student.id,
-            studentName: studentName(student),
-            courseId,
-            courseName: course.name,
-            gradeValue: currentGrade,
-          });
-        }
-
-        if (previous) {
-          const previousGrade = Number(previous.grade_value);
-          const delta = currentGrade - previousGrade;
-          if (delta < 0) {
-            droppingGrades.push({
-              studentId: student.id,
-              studentName: studentName(student),
-              courseId,
-              courseName: course.name,
-              currentGrade,
-              previousGrade,
-              delta,
-            });
-          }
-        }
-      }
+      const { lowGrades, droppingGrades } = summarizeGradeIssues(
+        (gradesResult.data ?? []) as GradeIssueRow[],
+        settings.gradeFloor,
+      );
 
       const students = (studentsResult.data ?? []) as StudentRow[];
       const latestQuranDate = new Map<string, string>();

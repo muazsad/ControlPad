@@ -202,6 +202,10 @@ export function LeaderboardClient({ students }: { students: StudentSubScores[] }
   }));
 
   const chartHeight = Math.max(280, chartData.length * 44);
+  const emptyMessage =
+    students.length === 0
+      ? "No students have enough grade and Quran data to rank yet."
+      : "No student data available.";
 
   return (
     <div className="space-y-6">
@@ -254,7 +258,7 @@ export function LeaderboardClient({ students }: { students: StudentSubScores[] }
         <CardContent>
           {chartData.length === 0 ? (
             <p className="py-8 text-center text-sm text-muted-foreground">
-              No student data available.
+              {emptyMessage}
             </p>
           ) : (
             <ResponsiveContainer width="100%" height={chartHeight}>
@@ -369,7 +373,7 @@ export function LeaderboardClient({ students }: { students: StudentSubScores[] }
             </table>
             {ranked.length === 0 && (
               <p className="py-10 text-center text-sm text-muted-foreground">
-                No students to rank.
+                {emptyMessage}
               </p>
             )}
           </div>

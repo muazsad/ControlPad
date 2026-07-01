@@ -34,6 +34,13 @@ import {
   studentName,
   type Student,
 } from "@/lib/people/people";
+import {
+  getEscalationStudents,
+} from "@/lib/people/escalation-data";
+import type {
+  EscalationLevel,
+  EscalationStudentResult,
+} from "@/lib/people/escalation";
 import { createClient } from "@/lib/supabase/server";
 
 function issueTone(count: number) {
@@ -86,15 +93,105 @@ function IssueGroup({
   );
 }
 
+function escalationTone(level: EscalationLevel) {
+  if (level === "critical") return "danger" as const;
+  if (level === "watch") return "warning" as const;
+  return "neutral" as const;
+}
+
+function signalLabel(signal: string) {
+  if (signal === "quran") return "Quran";
+  return signal.charAt(0).toUpperCase() + signal.slice(1);
+}
+
+function CriticalStudentsSection({
+  escalations,
+}: {
+  escalations: EscalationStudentResult[];
+}) {
+  const rows = escalations.filter((row) => row.level !== "ok");
+
+  return (
+    <Card className="border shadow-sm">
+      <CardHeader className="flex-row items-start justify-between gap-4 space-y-0">
+        <div>
+          <CardTitle>Critical students</CardTitle>
+          <CardDescription>
+            Repeat patterns across the last 30 days, separate from today&apos;s snapshot.
+          </CardDescription>
+        </div>
+        <StatusBadge
+          status={`${rows.length}`}
+          tone={rows.some((row) => row.level === "critical") ? "danger" : "neutral"}
+        />
+      </CardHeader>
+      <CardContent>
+        {rows.length === 0 ? (
+          <EmptyState
+            title="No persistent issues"
+            description="Repeat grade, attendance, Quran, or tuition patterns will appear here."
+            icon={CheckCircle2}
+          />
+        ) : (
+          <div className="divide-y rounded-lg border">
+            {rows.map((row) => (
+              <div
+                key={row.studentId}
+                className="flex flex-col gap-3 p-4 md:flex-row md:items-center md:justify-between"
+              >
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Link
+                      href={`/students/${row.studentId}`}
+                      className="font-semibold text-primary hover:underline"
+                    >
+                      {row.studentName}
+                    </Link>
+                    <StatusBadge
+                      status={row.level}
+                      tone={escalationTone(row.level)}
+                      className="capitalize"
+                    />
+                  </div>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    {row.reasons.join(" · ")}
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-2 md:justify-end">
+                  {Object.entries(row.signals)
+                    .filter(([, signal]) => signal.tripped)
+                    .map(([key, signal]) => (
+                      <StatusBadge
+                        key={key}
+                        status={`${signalLabel(key)} ${signal.occurrences}x / ${signal.durationDays}d`}
+                        tone={escalationTone(signal.level)}
+                      />
+                    ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 function AdminDashboard({
   fullName,
   summary,
+  escalations,
 }: {
   fullName: string;
   summary: AdminDailySummary;
+  escalations: EscalationStudentResult[];
 }) {
   const gradeIssueCount =
     summary.lowGrades.length + summary.droppingGrades.length;
+  const gradeIssueDescription =
+    gradeIssueCount > 0
+      ? `Below ${summary.settings.gradeFloor}%: ${summary.lowGrades.length} · Dropping: ${summary.droppingGrades.length}`
+      : "No grade issues are waiting.";
   const issueTotal = totalIssues(summary);
 
   const cards = [
@@ -123,10 +220,7 @@ function AdminDashboard({
     {
       title: "Low/dropping grades",
       value: gradeIssueCount,
-      description:
-        gradeIssueCount > 0
-          ? `Floor: ${summary.settings.gradeFloor}%.`
-          : "No grade issues are waiting.",
+      description: gradeIssueDescription,
       href: "/grades",
       icon: GraduationCap,
       tone: issueTone(gradeIssueCount),
@@ -186,6 +280,8 @@ function AdminDashboard({
         </div>
       </section>
 
+      <CriticalStudentsSection escalations={escalations} />
+
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
         {cards.map((item) => (
           <SummaryCard key={item.title} {...item} />
@@ -233,7 +329,7 @@ function AdminDashboard({
                   {issue.courseName} - {issue.gradeValue}%
                 </p>
               </div>
-              <StatusBadge status="Low" tone="danger" />
+              <StatusBadge status="Below floor" tone="danger" />
             </div>
           ))}
           {summary.droppingGrades.map((issue) => (
@@ -508,6 +604,7 @@ export default async function HomePage() {
 
   let children: Student[] = [];
   let adminDailySummary: AdminDailySummary | null = null;
+  let adminEscalations: EscalationStudentResult[] = [];
   if (profile.role === "parent") {
     const supabase = await createClient();
     // RLS guarantees this only returns students linked to this parent.
@@ -519,7 +616,11 @@ export default async function HomePage() {
       .order("last_name", { ascending: true });
     children = (data ?? []) as Student[];
   } else if (profile.role === "admin") {
-    adminDailySummary = await getAdminDailySummary(todayInSchoolTimeZone());
+    const today = todayInSchoolTimeZone();
+    [adminDailySummary, adminEscalations] = await Promise.all([
+      getAdminDailySummary(today),
+      getEscalationStudents(today),
+    ]);
   }
 
   return (
@@ -527,7 +628,11 @@ export default async function HomePage() {
       {profile.role === "parent" ? (
         <ParentDashboard fullName={profile.fullName} students={children} />
       ) : profile.role === "admin" && adminDailySummary ? (
-        <AdminDashboard fullName={profile.fullName} summary={adminDailySummary} />
+        <AdminDashboard
+          fullName={profile.fullName}
+          summary={adminDailySummary}
+          escalations={adminEscalations}
+        />
       ) : (
         <StaffDashboard fullName={profile.fullName} role={profile.role} />
       )}

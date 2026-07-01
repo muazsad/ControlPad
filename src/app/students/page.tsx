@@ -93,9 +93,9 @@ export default async function StudentsPage() {
               cell: (row) => (
                 <StatusBadge
                   status={
-                    row.globalScore !== null
+                    row.globalStatus === "scored" && row.globalScore !== null
                       ? `${Math.round(row.globalScore)}%`
-                      : "No data"
+                      : "Not enough data yet"
                   }
                   tone={row.globalTone}
                 />

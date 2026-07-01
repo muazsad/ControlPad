@@ -17,7 +17,12 @@ import {
 } from "@/components/ui/card";
 import { getCurrentProfile } from "@/lib/auth/current-profile";
 import { studentName, type Student } from "@/lib/people/people";
+import {
+  summarizeQuranProgress,
+  type QuranPattern,
+} from "@/lib/people/quran-progress";
 import { createClient } from "@/lib/supabase/server";
+import { QuranProgressChart } from "./quran-progress-chart";
 
 type ProgressRow = {
   id: string;
@@ -28,7 +33,23 @@ type ProgressRow = {
   lines_memorized: number;
   note: string | null;
   recorded_at: string;
-  cumulative_lines: number | null;
+};
+
+const PATTERN_LABEL: Record<QuranPattern, string> = {
+  consistent: "Consistent",
+  accelerating: "Accelerating",
+  irregular: "Irregular",
+  stagnant: "Stagnant",
+};
+
+const PATTERN_TONE: Record<
+  QuranPattern,
+  "success" | "warning" | "danger" | "neutral"
+> = {
+  consistent: "success",
+  accelerating: "success",
+  irregular: "warning",
+  stagnant: "danger",
 };
 
 export default async function QuranStudentPage({
@@ -55,13 +76,16 @@ export default async function QuranStudentPage({
   const { data: progressData } = await supabase
     .from("quran_progress")
     .select(
-      "id, date, surah, from_ayah, to_ayah, lines_memorized, note, recorded_at, cumulative_lines",
+      "id, date, surah, from_ayah, to_ayah, lines_memorized, note, recorded_at",
     )
     .eq("student_id", studentId)
     .order("date", { ascending: false })
     .order("recorded_at", { ascending: false });
 
   const entries = (progressData ?? []) as ProgressRow[];
+  const progressSummary = summarizeQuranProgress(
+    entries.map(({ date, lines_memorized }) => ({ date, lines_memorized })),
+  );
 
   // Compute running totals chronologically (oldest first).
   const sorted = [...entries].reverse();
@@ -116,6 +140,37 @@ export default async function QuranStudentPage({
             )}
           </div>
         </div>
+
+        <Card className="border shadow-sm">
+          <CardHeader className="space-y-2">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <CardTitle>Memorization pattern</CardTitle>
+                <CardDescription>
+                  Cumulative lines over time, calculated from raw lesson entries.
+                </CardDescription>
+              </div>
+              {progressSummary.pattern.status === "classified" ? (
+                <StatusBadge
+                  status={PATTERN_LABEL[progressSummary.pattern.pattern]}
+                  tone={PATTERN_TONE[progressSummary.pattern.pattern]}
+                />
+              ) : null}
+            </div>
+            <p className="text-sm text-muted-foreground">
+              {progressSummary.pattern.description}
+            </p>
+          </CardHeader>
+          <CardContent>
+            {progressSummary.pattern.status === "classified" ? (
+              <QuranProgressChart series={progressSummary.series} />
+            ) : (
+              <div className="flex min-h-48 items-center justify-center rounded-lg border border-dashed bg-muted/30 px-4 text-center text-sm text-muted-foreground">
+                Not enough data to chart a trend yet.
+              </div>
+            )}
+          </CardContent>
+        </Card>
 
         <Card className="border shadow-sm">
           <CardHeader className="flex-row items-center justify-between gap-4 space-y-0">

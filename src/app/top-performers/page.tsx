@@ -9,14 +9,16 @@ export default async function TopPerformersPage() {
   const metrics = await getAllStudentMetrics();
 
   // Pass only the serialisable sub-scores the client needs — not the full row.
-  const students: StudentSubScores[] = metrics.map((s) => ({
-    id: s.id,
-    name: s.name,
-    grade_level: s.grade_level,
-    gradeScore: s.gradeScore,
-    quranScore: s.quranResult.score,
-    attRate: s.attRate,
-  }));
+  const students: StudentSubScores[] = metrics
+    .filter((s) => s.globalStatus === "scored")
+    .map((s) => ({
+      id: s.id,
+      name: s.name,
+      grade_level: s.grade_level,
+      gradeScore: s.gradeScore,
+      quranScore: s.quranResult.score,
+      attRate: s.attRate,
+    }));
 
   return (
     <AppShell fullName={profile.fullName} role={profile.role}>

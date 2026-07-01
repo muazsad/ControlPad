@@ -4,6 +4,7 @@ import { describe, it } from "node:test";
 import {
   formatAdminDigestSms,
   sendAdminDigest,
+  summarizeGradeIssues,
   type AdminDigestDatabase,
   type AdminDailySummary,
 } from "./admin-digest";
@@ -45,6 +46,70 @@ class FakeAdminDigestDatabase implements AdminDigestDatabase {
 }
 
 describe("admin digest", () => {
+  it("classifies an above-floor grade drop as dropping but not below floor", () => {
+    const result = summarizeGradeIssues(
+      [
+        {
+          course_id: "english",
+          grade_value: 80,
+          recorded_at: "2026-06-27T10:00:00.000Z",
+          courses: { id: "english", name: "English" },
+          students: { id: "student-1", first_name: "Muaz", last_name: "Sadique" },
+        },
+        {
+          course_id: "english",
+          grade_value: 89,
+          recorded_at: "2026-06-20T10:00:00.000Z",
+          courses: { id: "english", name: "English" },
+          students: { id: "student-1", first_name: "Muaz", last_name: "Sadique" },
+        },
+      ],
+      70,
+    );
+
+    assert.equal(result.lowGrades.length, 0);
+    assert.equal(result.droppingGrades.length, 1);
+    assert.equal(result.droppingGrades[0].currentGrade, 80);
+    assert.equal(result.droppingGrades[0].previousGrade, 89);
+    assert.equal(result.droppingGrades[0].delta, -9);
+  });
+
+  it("classifies a grade below the floor as below floor", () => {
+    const result = summarizeGradeIssues(
+      [
+        {
+          course_id: "math",
+          grade_value: 65,
+          recorded_at: "2026-06-27T10:00:00.000Z",
+          courses: { id: "math", name: "Math" },
+          students: { id: "student-2", first_name: "Amina", last_name: "Noor" },
+        },
+      ],
+      70,
+    );
+
+    assert.equal(result.lowGrades.length, 1);
+    assert.equal(result.lowGrades[0].gradeValue, 65);
+    assert.equal(result.droppingGrades.length, 0);
+  });
+
+  it("does not classify a grade exactly at the floor as below floor", () => {
+    const result = summarizeGradeIssues(
+      [
+        {
+          course_id: "science",
+          grade_value: 70,
+          recorded_at: "2026-06-27T10:00:00.000Z",
+          courses: { id: "science", name: "Science" },
+          students: { id: "student-3", first_name: "Yusuf", last_name: "Ali" },
+        },
+      ],
+      70,
+    );
+
+    assert.equal(result.lowGrades.length, 0);
+  });
+
   it("formats an all-clear digest with zero counts", () => {
     const body = formatAdminDigestSms(emptySummary);
 

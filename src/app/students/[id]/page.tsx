@@ -189,7 +189,13 @@ export default async function StudentDetailPage({
   const attendanceRecords = (attendanceData ?? []) as AttendanceRecord[];
   const attRate = attendanceRate(attendanceRecords);
 
-  const globalScore = globalPerformance(gradeAvg, quranResult.score);
+  const globalResult = globalPerformance({
+    gradeScore: gradeAvg,
+    quranScore: quranResult.score,
+    gradedCourseCount: latestGradesPerCourse.length,
+    quranEntryCount: quranEntries.length,
+  });
+  const globalScore = globalResult.score;
   const globalTone = performanceTone(globalScore);
 
   // Only admins can create links, so only they need the candidate list.
@@ -238,7 +244,11 @@ export default async function StudentDetailPage({
             <div className="flex items-center gap-2">
               <span className="text-xs text-muted-foreground">Global</span>
               <StatusBadge
-                status={globalScore !== null ? `${Math.round(globalScore)}%` : "No data"}
+                status={
+                  globalResult.status === "scored" && globalScore !== null
+                    ? `${Math.round(globalScore)}%`
+                    : "Not enough data yet"
+                }
                 tone={globalTone}
               />
             </div>
