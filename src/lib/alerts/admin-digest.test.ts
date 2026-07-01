@@ -12,6 +12,7 @@ import type { SendSmsInput } from "@/lib/sms/send-sms";
 
 const emptySummary: AdminDailySummary = {
   date: "2026-06-27",
+  schoolDayType: "full",
   settings: {
     adminDigestTime: "15:00",
     gradeFloor: 70,
@@ -120,6 +121,17 @@ describe("admin digest", () => {
     assert.match(body, /Quran 0/);
     assert.match(body, /Payments 0/);
     assert.match(body, /All clear/);
+  });
+
+  it("formats off-day summaries with a no-school note", () => {
+    const body = formatAdminDigestSms({
+      ...emptySummary,
+      date: "2026-07-03",
+      schoolDayType: "off",
+    });
+
+    assert.match(body, /No school today/);
+    assert.match(body, /Absences 0/);
   });
 
   it("formats issue counts and includes the first issue names", () => {

@@ -30,6 +30,10 @@ import {
   type AdminDailySummary,
 } from "@/lib/alerts/admin-digest";
 import {
+  dailySummarySeverity,
+  gradeIssueSeverity,
+} from "@/lib/alerts/admin-dashboard-severity";
+import {
   enrollmentBadgeTone,
   studentName,
   type Student,
@@ -43,7 +47,7 @@ import type {
 } from "@/lib/people/escalation";
 import { createClient } from "@/lib/supabase/server";
 
-function issueTone(count: number) {
+function dangerIssueTone(count: number) {
   return count > 0 ? ("danger" as const) : ("success" as const);
 }
 
@@ -193,29 +197,40 @@ function AdminDashboard({
       ? `Below ${summary.settings.gradeFloor}%: ${summary.lowGrades.length} · Dropping: ${summary.droppingGrades.length}`
       : "No grade issues are waiting.";
   const issueTotal = totalIssues(summary);
+  const summarySeverity = dailySummarySeverity(summary);
+  const gradeTone = gradeIssueSeverity({
+    belowFloorCount: summary.lowGrades.length,
+    droppingCount: summary.droppingGrades.length,
+  });
 
   const cards = [
     {
       title: "Absences today",
       value: summary.absences.length,
       description:
-        summary.absences.length > 0
-          ? "Students marked absent today."
-          : "No students are marked absent.",
+        summary.schoolDayType === "off"
+          ? "No school today."
+          : summary.absences.length > 0
+            ? "Students marked absent today."
+            : "No students are marked absent.",
       href: "/attendance",
       icon: CalendarX2,
-      tone: issueTone(summary.absences.length),
+      tone: dangerIssueTone(summary.absences.length),
     },
     {
       title: "Tardies today",
       value: summary.tardies.length,
       description:
-        summary.tardies.length > 0
-          ? "Students marked tardy today."
-          : "No students are marked tardy.",
+        summary.schoolDayType === "off"
+          ? "No school today."
+          : summary.schoolDayType === "half"
+            ? "Half-day schedule today."
+            : summary.tardies.length > 0
+              ? "Students marked tardy today."
+              : "No students are marked tardy.",
       href: "/attendance",
       icon: Clock3,
-      tone: issueTone(summary.tardies.length),
+      tone: summary.tardies.length > 0 ? ("warning" as const) : ("success" as const),
     },
     {
       title: "Low/dropping grades",
@@ -223,18 +238,20 @@ function AdminDashboard({
       description: gradeIssueDescription,
       href: "/grades",
       icon: GraduationCap,
-      tone: issueTone(gradeIssueCount),
+      tone: gradeTone,
     },
     {
       title: "Quran slippage",
       value: summary.quranSlippage.length,
       description:
-        summary.quranSlippage.length > 0
-          ? `Threshold: ${summary.settings.quranInactivityDays} days.`
-          : "No Quran slippage is waiting.",
+        summary.schoolDayType === "off"
+          ? "No school today."
+          : summary.quranSlippage.length > 0
+            ? `Threshold: ${summary.settings.quranInactivityDays} school days.`
+            : "No Quran slippage is waiting.",
       href: "/quran",
       icon: BookOpenCheck,
-      tone: issueTone(summary.quranSlippage.length),
+      tone: dangerIssueTone(summary.quranSlippage.length),
     },
     {
       title: "Overdue payments",
@@ -245,7 +262,7 @@ function AdminDashboard({
           : "No overdue tuition items.",
       href: "/tuition",
       icon: CreditCard,
-      tone: issueTone(summary.overduePayments.length),
+      tone: dangerIssueTone(summary.overduePayments.length),
     },
   ];
 
@@ -256,9 +273,14 @@ function AdminDashboard({
           <div>
             <div className="mb-3 flex flex-wrap items-center gap-2">
               <StatusBadge status="Admin" tone="neutral" />
+              {summary.schoolDayType === "off" ? (
+                <StatusBadge status="No school today" tone="neutral" />
+              ) : summary.schoolDayType === "half" ? (
+                <StatusBadge status="Half-day schedule" tone="warning" />
+              ) : null}
               <StatusBadge
-                status={issueTotal > 0 ? "Needs attention" : "All clear"}
-                tone={issueTotal > 0 ? "danger" : "success"}
+                status={summarySeverity.label}
+                tone={summarySeverity.tone}
               />
             </div>
             <h1 className="text-2xl font-semibold tracking-normal sm:text-3xl">
@@ -273,7 +295,9 @@ function AdminDashboard({
             <p className="font-semibold">Today&apos;s watchlist</p>
             <p className="mt-1 text-muted-foreground">
               {issueTotal > 0
-                ? `${issueTotal} item${issueTotal === 1 ? "" : "s"} need review.`
+                ? summarySeverity.dangerCount > 0
+                  ? `${summarySeverity.dangerCount} urgent item${summarySeverity.dangerCount === 1 ? "" : "s"} need review.`
+                  : `${summarySeverity.warningCount} item${summarySeverity.warningCount === 1 ? "" : "s"} to watch.`
                 : "No urgent items are waiting."}
             </p>
           </div>
@@ -292,7 +316,11 @@ function AdminDashboard({
         <IssueGroup
           title="Attendance"
           href="/attendance"
-          empty="No absences or tardies today."
+          empty={
+            summary.schoolDayType === "off"
+              ? "No school today."
+              : "No absences or tardies today."
+          }
           hasItems={summary.absences.length + summary.tardies.length > 0}
         >
           {[...summary.absences, ...summary.tardies].map((issue) => (
@@ -352,7 +380,11 @@ function AdminDashboard({
         <IssueGroup
           title="Quran progress"
           href="/quran"
-          empty="No Quran slippage today."
+          empty={
+            summary.schoolDayType === "off"
+              ? "No school today."
+              : "No Quran slippage today."
+          }
           hasItems={summary.quranSlippage.length > 0}
         >
           {summary.quranSlippage.map((issue) => (

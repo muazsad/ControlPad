@@ -60,32 +60,19 @@ Ask a focused question rather than guessing on schema, role permissions, or mone
 <claude-mem-context>
 # Memory Context
 
-# [ControlPad] recent context, 2026-07-01 5:29pm EDT
+# [ControlPad] recent context, 2026-07-01 6:57pm EDT
 
 Legend: 🎯session 🔴bugfix 🟣feature 🔄refactor ✅change 🔵discovery ⚖️decision 🚨security_alert 🔐security_note
 Format: ID TIME TYPE TITLE
 Fetch details: get_observations([IDs]) | Search: mem-search skill
 
-Stats: 50 obs (21,945t read) | 677,103t work | 97% savings
+Stats: 50 obs (23,254t read) | 1,528,442t work | 98% savings
 
 ### Jun 26, 2026
 S51 Build tuition tracking — design spec written, committed, and awaiting user review before implementation plan (Jun 26 at 9:24 PM)
 S52 Build tuition tracking — implementation starting; tasks created and first task in progress (Jun 26 at 9:27 PM)
 S53 ControlPad read-only recon: schema validation, routing audit, component inventory, and implementation plan for student profile + leaderboard features (Jun 26 at 9:29 PM)
-448 9:30p 🔵 DataTable and Student Type APIs Confirmed for Tuition Page Implementation
-449 9:31p 🟣 setPaymentStatus Server Action Implemented
-450 " 🟣 Tuition Page Implemented — Admin Grid with Month Navigation and Parent Read-Only View
-451 " 🟣 Task 2 Complete — Tuition UI Passes Lint with No Errors
-452 " 🔴 TypeScript Cast Fix for Bound Server Action on Form Element
-453 9:32p 🟣 Tuition UI Committed — Admin Toggle and Parent View Shipped
-454 " 🟣 Payment Alert Library Implemented — src/lib/alerts/payment.ts
-455 " 🔴 Bug Found: Parent View Uses URL Month Param Instead of Current Month
-456 9:33p 🔴 Parent Month Lock Bug Fixed and Committed — sha 5516e6e
-457 " 🔴 Code Quality Review: Tuition Actions + Page — "Needs Work" Verdict with 2 Important Issues
-459 9:39p 🔴 actions.ts: _prevState param added for useActionState compatibility
 ### Jun 27, 2026
-462 7:33p 🔵 ControlPad Recon: Schema, Routing, and Feature Planning
-463 " 🔵 ControlPad: Project Scope, Stack, and Data Model Overview
 464 7:34p 🔵 ControlPad: Exact Schema for grades, quran_progress, attendance — All Required Fields Confirmed Present
 465 " 🔵 ControlPad: Routing Structure, Data Fetching Pattern, and Existing Components
 S55 Create pure TypeScript performance metric utility at src/lib/people/performance.ts — completed and committed (Jun 27 at 7:36 PM)
@@ -131,6 +118,19 @@ S60 Top Performers page (Task 5) — complete implementation with recharts bar c
 499 " 🔵 Stale Cache Hit on admin-digest.ts — Read Returns Pre-Patch Content Despite Successful Apply
 500 " 🔵 Triple-Apply Loop: Stale Cache Caused Same Patches Applied 3x and Cached Test Output Served as Fresh Results
 498 5:14p 🔵 Full Verification Passed — Build Clean After All Changes, AGENTS.md Also Modified
+503 5:16p 🟣 New spec received: Escalation utility + Critical Students dashboard section
+504 5:17p 🔴 student-metrics.ts full shape — key anchor for escalation helper
+505 " 🔴 Admin-digest.ts existing signal types — reusable for escalation
+506 " 🔴 Admin dashboard page.tsx layout — insertion point for Critical Students section
+507 " 🔴 escalation.ts + escalation.test.ts: GREEN — 34/34 tests pass after 2 fix iterations
+508 " 🔴 grades table has NO `date` column — only `recorded_at` (timestamptz)
+509 " 🔴 page.tsx data-fetch pattern: AdminDashboard fetched in HomePage, escalation needs parallel fetch
+510 5:29p 🟣 Grade Card Tone Severity Fix — Danger vs Warning Signal Separation
+515 5:30p ✅ Escalation Test File Re-Created — New TDD Cycle Starting
+511 6:24p 🟣 Grade Card Severity Module — Danger vs Warning Separation
+512 " 🔵 Live Data Confirms Grade Card Tone Fix — Amber Not Red
+513 " 🔴 Tardy Card Tone Fixed — Warning Not Danger
+514 " 🟣 Escalation System — Full 4-Step Implementation (Prior Session Work Confirmed)
 
-Access 677k tokens of past work via get_observations([IDs]) or mem-search skill.
+Access 1528k tokens of past work via get_observations([IDs]) or mem-search skill.
 </claude-mem-context>

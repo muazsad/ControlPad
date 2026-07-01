@@ -1,5 +1,13 @@
 import { createServiceClient } from "@/lib/supabase/server";
 import { sendSms, type SendSmsInput, type SmsResult } from "@/lib/sms/send-sms";
+import { computeOverduePaymentCycles } from "@/lib/alerts/payment-overdue";
+import { evaluateQuranInactivity } from "@/lib/alerts/quran";
+import { getServiceSchoolCalendar } from "@/lib/schedule/calendar-data";
+import {
+  dayType,
+  isSchoolDay,
+  type CalendarDayType,
+} from "@/lib/schedule/calendar";
 
 const SCHOOL_TIME_ZONE = "America/New_York";
 
@@ -55,6 +63,7 @@ export type OverduePaymentIssue = {
 
 export type AdminDailySummary = {
   date: string;
+  schoolDayType: CalendarDayType;
   settings: AdminDigestSettings;
   absences: AttendanceIssue[];
   tardies: AttendanceIssue[];
@@ -85,6 +94,7 @@ type StudentRow = {
   id: string;
   first_name: string;
   last_name: string;
+  created_at?: string | null;
 };
 
 type AttendanceRow = {
@@ -110,6 +120,8 @@ type QuranRow = {
 
 type PaymentRow = {
   student_id: string;
+  period_month: string;
+  status: "paid" | "unpaid";
 };
 
 export type GradeIssueSummary = {
@@ -163,22 +175,6 @@ function hasDigestTimeArrived(input: {
   if (current.date > input.date) return true;
   if (current.date < input.date) return false;
   return current.minutes >= parseTimeToMinutes(input.adminDigestTime);
-}
-
-function isoDate(date: Date) {
-  return date.toISOString().slice(0, 10);
-}
-
-function addDays(date: Date, days: number) {
-  const copy = new Date(date);
-  copy.setUTCDate(copy.getUTCDate() + days);
-  return copy;
-}
-
-function daysBetween(startDate: string, endDate: string) {
-  const start = new Date(`${startDate}T00:00:00.000Z`).getTime();
-  const end = new Date(`${endDate}T00:00:00.000Z`).getTime();
-  return Math.floor((end - start) / (1000 * 60 * 60 * 24));
 }
 
 function periodMonthFor(date: string) {
@@ -282,6 +278,9 @@ export function createSupabaseAdminDigestDatabase(): AdminDigestDatabase {
         quranInactivityDays: Number(settingsRow.quran_inactivity_days),
         paymentDueDay: Number(settingsRow.payment_due_day),
       };
+      const calendar = await getServiceSchoolCalendar();
+      const schoolDayType = dayType(date, calendar);
+      const schoolIsInSession = isSchoolDay(date, calendar);
 
       const [
         attendanceResult,
@@ -290,11 +289,13 @@ export function createSupabaseAdminDigestDatabase(): AdminDigestDatabase {
         quranResult,
         paidPaymentsResult,
       ] = await Promise.all([
-        supabase
-          .from("attendance")
-          .select("status, students(id, first_name, last_name)")
-          .eq("date", date)
-          .in("status", ["absent", "tardy"]),
+        schoolIsInSession
+          ? supabase
+              .from("attendance")
+              .select("status, students(id, first_name, last_name)")
+              .eq("date", date)
+              .in("status", ["absent", "tardy"])
+          : Promise.resolve({ data: [], error: null }),
         supabase
           .from("grades")
           .select(
@@ -303,7 +304,7 @@ export function createSupabaseAdminDigestDatabase(): AdminDigestDatabase {
           .order("recorded_at", { ascending: false }),
         supabase
           .from("students")
-          .select("id, first_name, last_name")
+          .select("id, first_name, last_name, created_at")
           .eq("enrollment_status", "active"),
         supabase
           .from("quran_progress")
@@ -311,9 +312,8 @@ export function createSupabaseAdminDigestDatabase(): AdminDigestDatabase {
           .order("date", { ascending: false }),
         supabase
           .from("payments")
-          .select("student_id")
+          .select("student_id, period_month, status")
           .eq("period_month", periodMonthFor(date))
-          .eq("status", "paid"),
       ]);
 
       if (attendanceResult.error) throw new Error(attendanceResult.error.message);
@@ -349,44 +349,63 @@ export function createSupabaseAdminDigestDatabase(): AdminDigestDatabase {
         }
       }
 
-      const cutoff = isoDate(
-        addDays(new Date(`${date}T00:00:00.000Z`), -settings.quranInactivityDays),
-      );
-      const quranSlippage = students
-        .filter((student) => {
-          const latest = latestQuranDate.get(student.id);
-          return !latest || latest < cutoff;
-        })
-        .map((student) => {
-          const latest = latestQuranDate.get(student.id);
-          return {
-            studentId: student.id,
-            studentName: studentName(student),
-            daysSinceLastLesson: latest
-              ? daysBetween(latest, date)
-              : settings.quranInactivityDays + 1,
-          };
-        });
-
-      const dayOfMonth = Number(date.slice(8, 10));
-      const paidStudentIds = new Set(
-        ((paidPaymentsResult.data ?? []) as PaymentRow[]).map(
-          (row) => row.student_id,
-        ),
-      );
-      const overduePayments =
-        dayOfMonth > settings.paymentDueDay
-          ? students
-              .filter((student) => !paidStudentIds.has(student.id))
-              .map((student) => ({
+      const quranSlippage = schoolIsInSession
+        ? students
+            .filter((student) => {
+              const latest = latestQuranDate.get(student.id);
+              return evaluateQuranInactivity({
+                lastLessonDate: latest ?? null,
+                asOfDate: date,
+                inactivitySchoolDays: settings.quranInactivityDays,
+                calendar,
+              }).slipping;
+            })
+            .map((student) => {
+              const latest = latestQuranDate.get(student.id);
+              return {
                 studentId: student.id,
                 studentName: studentName(student),
-                periodMonth: periodMonthFor(date),
-              }))
-          : [];
+                daysSinceLastLesson: evaluateQuranInactivity({
+                  lastLessonDate: latest ?? null,
+                  asOfDate: date,
+                  inactivitySchoolDays: settings.quranInactivityDays,
+                  calendar,
+                }).schoolDaysSinceLastLesson,
+              };
+            })
+        : [];
+
+      const paymentRows = (paidPaymentsResult.data ?? []) as PaymentRow[];
+      const paymentByStudent = new Map(
+        paymentRows.map((payment) => [payment.student_id, payment]),
+      );
+      const currentPeriodMonth = periodMonthFor(date);
+      const overduePayments = students
+        .filter((student) => {
+          const payment = paymentByStudent.get(student.id);
+          return (
+            computeOverduePaymentCycles({
+              asOfDate: date,
+              paymentDueDay: settings.paymentDueDay,
+              enrollmentAnchorDate: student.created_at ?? null,
+              cycles: [
+                {
+                  periodMonth: currentPeriodMonth,
+                  status: payment?.status ?? "unpaid",
+                },
+              ],
+            }).length > 0
+          );
+        })
+        .map((student) => ({
+          studentId: student.id,
+          studentName: studentName(student),
+          periodMonth: currentPeriodMonth,
+        }));
 
       return {
         date,
+        schoolDayType,
         settings,
         absences: attendanceIssues.filter((issue) => issue.status === "absent"),
         tardies: attendanceIssues.filter((issue) => issue.status === "tardy"),
@@ -419,6 +438,12 @@ export async function getAdminDailySummary(
 }
 
 export function formatAdminDigestSms(summary: AdminDailySummary) {
+  const schoolNote =
+    summary.schoolDayType === "off"
+      ? " No school today."
+      : summary.schoolDayType === "half"
+        ? " Half-day schedule today."
+        : "";
   const counts =
     `Absences ${summary.absences.length}, Tardies ${summary.tardies.length}, ` +
     `Low grades ${summary.lowGrades.length}, Dropping ${summary.droppingGrades.length}, ` +
@@ -429,7 +454,7 @@ export function formatAdminDigestSms(summary: AdminDailySummary) {
       ? ` Review: ${names.join(", ")}${issueCount(summary) > names.length ? ", and more" : ""}.`
       : " All clear.";
 
-  return `ControlPad daily summary for ${summary.date}: ${counts}${details}`;
+  return `ControlPad daily summary for ${summary.date}:${schoolNote} ${counts}${details}`;
 }
 
 export async function sendAdminDigest(

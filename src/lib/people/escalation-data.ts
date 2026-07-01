@@ -8,11 +8,15 @@ import {
   type EscalationStudentInput,
   type EscalationStudentResult,
 } from "@/lib/people/escalation";
+import { periodMonthFor, paymentDueDate } from "@/lib/alerts/payment-overdue";
+import { getSchoolCalendar } from "@/lib/schedule/calendar-data";
+import { schoolDayWindowEnding } from "@/lib/schedule/calendar";
 
 type StudentRow = {
   id: string;
   first_name: string;
   last_name: string;
+  created_at: string | null;
 };
 
 type GradeRow = {
@@ -61,19 +65,9 @@ function addDays(date: string, days: number) {
   return d.toISOString().slice(0, 10);
 }
 
-function periodMonthFor(date: string) {
-  return `${date.slice(0, 7)}-01`;
-}
-
 function addMonths(periodMonth: string, months: number) {
   const d = new Date(`${periodMonth}T00:00:00.000Z`);
   d.setUTCMonth(d.getUTCMonth() + months);
-  return d.toISOString().slice(0, 10);
-}
-
-function paymentDueDate(periodMonth: string, dueDay: number) {
-  const d = new Date(`${periodMonth}T00:00:00.000Z`);
-  d.setUTCDate(dueDay);
   return d.toISOString().slice(0, 10);
 }
 
@@ -107,12 +101,46 @@ function groupByStudent<T extends { student_id: string }>(rows: T[]) {
   return map;
 }
 
+function earliestDate(values: (string | null | undefined)[]): string | null {
+  const dates = values
+    .filter((value): value is string => Boolean(value))
+    .map(dateOnly)
+    .sort();
+  return dates[0] ?? null;
+}
+
+function enrollmentAnchorFor(input: {
+  student: StudentRow;
+  payments: PaymentRow[];
+  attendance: AttendanceRow[];
+  grades: GradeRow[];
+  asOfDate: string;
+}) {
+  if (input.student.created_at) return dateOnly(input.student.created_at);
+
+  // Proxy fallback only: the schema has students.created_at, but if imported
+  // data ever lacks it, use the earliest existing school record as enrollment.
+  return (
+    earliestDate([
+      ...input.payments.map((payment) => payment.period_month),
+      ...input.attendance.map((record) => record.date),
+      ...input.grades.map((grade) => grade.recorded_at),
+    ]) ?? periodMonthFor(input.asOfDate)
+  );
+}
+
 export async function getEscalationStudents(
   asOfDate: string,
 ): Promise<EscalationStudentResult[]> {
   const supabase = await createClient();
   const endDate = dateOnly(asOfDate);
-  const startDate = addDays(endDate, -ESCALATION_WINDOW_DAYS);
+  const calendar = await getSchoolCalendar();
+  const schoolWindow = schoolDayWindowEnding(
+    endDate,
+    ESCALATION_WINDOW_DAYS,
+    calendar,
+  );
+  const startDate = schoolWindow[0] ?? addDays(endDate, -ESCALATION_WINDOW_DAYS);
   const startIso = `${startDate}T00:00:00.000Z`;
 
   const [
@@ -131,7 +159,7 @@ export async function getEscalationStudents(
       .single(),
     supabase
       .from("students")
-      .select("id, first_name, last_name")
+      .select("id, first_name, last_name, created_at")
       .eq("enrollment_status", "active")
       .order("last_name", { ascending: true }),
     supabase
@@ -178,6 +206,7 @@ export async function getEscalationStudents(
     tardiesPerWeek: Number(settingsResult.data.tardies_per_week),
     quranInactivityDays: Number(settingsResult.data.quran_inactivity_days),
     paymentDueDay: Number(settingsResult.data.payment_due_day),
+    calendar,
   };
   const students = (studentsResult.data ?? []) as StudentRow[];
   const gradesByStudent = groupByStudent((gradesResult.data ?? []) as GradeRow[]);
@@ -206,6 +235,18 @@ export async function getEscalationStudents(
   }
 
   const input: EscalationStudentInput[] = students.map((student) => {
+    const studentRawPayments = payments.filter(
+      (payment) => payment.student_id === student.id,
+    );
+    const studentAttendance = attendanceByStudent.get(student.id) ?? [];
+    const studentGrades = gradesByStudent.get(student.id) ?? [];
+    const enrollmentAnchorDate = enrollmentAnchorFor({
+      student,
+      payments: studentRawPayments,
+      attendance: studentAttendance,
+      grades: studentGrades,
+      asOfDate: endDate,
+    });
     const studentPayments: EscalationPaymentEntry[] = dueMonths.map((periodMonth) => {
       const payment = paymentStatusByStudentPeriod.get(`${student.id}:${periodMonth}`);
       return {
@@ -217,12 +258,13 @@ export async function getEscalationStudents(
     return {
       id: student.id,
       name: studentName(student),
-      grades: (gradesByStudent.get(student.id) ?? []).map((grade) => ({
+      enrollmentAnchorDate,
+      grades: studentGrades.map((grade) => ({
         date: dateOnly(grade.recorded_at),
         courseId: grade.course_id,
         gradeValue: Number(grade.grade_value),
       })),
-      attendance: (attendanceByStudent.get(student.id) ?? []).map(
+      attendance: studentAttendance.map(
         (record): EscalationAttendanceEntry => ({
           date: record.date,
           status: record.status,

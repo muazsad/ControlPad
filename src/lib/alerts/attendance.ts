@@ -1,5 +1,12 @@
 import { createServiceClient } from "@/lib/supabase/server";
 import { sendSms, type SendSmsInput, type SmsResult } from "@/lib/sms/send-sms";
+import { getServiceSchoolCalendar } from "@/lib/schedule/calendar-data";
+import {
+  isSchoolDay,
+  schoolDayWindowEnding,
+  schoolStartForDate,
+  type SchoolCalendarConfig,
+} from "@/lib/schedule/calendar";
 
 const SCHOOL_TIME_ZONE = "America/New_York";
 
@@ -32,10 +39,12 @@ export type AttendanceSettings = {
 
 export type AttendanceAlertDatabase = {
   getAttendanceSettings(): Promise<AttendanceSettings>;
+  getSchoolCalendar(): Promise<SchoolCalendarConfig>;
   getAdminRecipients(): Promise<Recipient[]>;
   getAbsentStudentsForDate(date: string): Promise<AttendanceAlertStudent[]>;
   getStudentsAtTardyThreshold(input: {
     endDate: string;
+    schoolDates: string[];
     tardiesPerWeek: number;
   }): Promise<TardyThresholdStudent[]>;
 };
@@ -198,6 +207,9 @@ export function createSupabaseAttendanceAlertDatabase(): AttendanceAlertDatabase
         tardiesPerWeek: Number(data.tardies_per_week),
       };
     },
+    async getSchoolCalendar() {
+      return getServiceSchoolCalendar();
+    },
     async getAdminRecipients() {
       const { data, error } = await supabase
         .from("profiles")
@@ -235,17 +247,18 @@ export function createSupabaseAttendanceAlertDatabase(): AttendanceAlertDatabase
         })
         .filter((student): student is AttendanceAlertStudent => Boolean(student));
     },
-    async getStudentsAtTardyThreshold({ endDate, tardiesPerWeek }) {
-      const start = new Date(`${endDate}T00:00:00.000Z`);
-      start.setUTCDate(start.getUTCDate() - 6);
-      const startDate = start.toISOString().slice(0, 10);
+    async getStudentsAtTardyThreshold({ endDate, schoolDates, tardiesPerWeek }) {
+      if (schoolDates.length === 0) return [];
+
+      const startDate = schoolDates[0];
 
       const { data, error } = await supabase
         .from("attendance")
         .select("student_id, students(id, first_name, last_name)")
         .eq("status", "tardy")
         .gte("date", startDate)
-        .lte("date", endDate);
+        .lte("date", endDate)
+        .in("date", schoolDates);
 
       if (error) throw new Error(error.message);
 
@@ -289,13 +302,20 @@ export async function checkAbsenceAlerts(
 ): Promise<AlertResult> {
   const database = deps.database ?? createSupabaseAttendanceAlertDatabase();
   const send = deps.sendSms ?? sendSms;
-  const settings = await database.getAttendanceSettings();
+  const [settings, calendar] = await Promise.all([
+    database.getAttendanceSettings(),
+    database.getSchoolCalendar(),
+  ]);
+
+  if (!isSchoolDay(input.date, calendar)) {
+    return { checked: false, students: 0, messages: 0 };
+  }
 
   if (
     !hasAbsenceWindowOpened({
       date: input.date,
       now: input.now ?? new Date(),
-      schoolStart: settings.schoolStart,
+      schoolStart: schoolStartForDate(input.date, calendar, settings.schoolStart),
       tardyWindowHours: settings.tardyWindowHours,
     })
   ) {
@@ -344,9 +364,18 @@ export async function checkTardyThresholdAlerts(
 ): Promise<AlertResult> {
   const database = deps.database ?? createSupabaseAttendanceAlertDatabase();
   const send = deps.sendSms ?? sendSms;
-  const settings = await database.getAttendanceSettings();
+  const [settings, calendar] = await Promise.all([
+    database.getAttendanceSettings(),
+    database.getSchoolCalendar(),
+  ]);
+  if (!isSchoolDay(input.date, calendar)) {
+    return { checked: false, students: 0, messages: 0 };
+  }
+
+  const schoolDates = schoolDayWindowEnding(input.date, 7, calendar);
   const students = await database.getStudentsAtTardyThreshold({
     endDate: input.date,
+    schoolDates,
     tardiesPerWeek: settings.tardiesPerWeek,
   });
   const messages: SendSmsInput[] = [];

@@ -1,4 +1,10 @@
 import { summarizeQuranProgress } from "@/lib/people/quran-progress";
+import { computeOverduePaymentCycles } from "@/lib/alerts/payment-overdue";
+import {
+  isSchoolDay,
+  schoolDaysSince,
+  type SchoolCalendarConfig,
+} from "@/lib/schedule/calendar";
 
 // ── Tunable constants ────────────────────────────────────────────────────────
 
@@ -54,6 +60,7 @@ export type EscalationNotificationEntry = {
 export type EscalationStudentInput = {
   id: string;
   name: string;
+  enrollmentAnchorDate?: string | null;
   grades: EscalationGradeEntry[];
   attendance: EscalationAttendanceEntry[];
   quranProgress: EscalationQuranEntry[];
@@ -67,6 +74,7 @@ export type EscalationSettings = {
   tardiesPerWeek: number;
   quranInactivityDays: number;
   paymentDueDay: number;
+  calendar?: SchoolCalendarConfig;
 };
 
 export type EscalationSignalBreakdown = {
@@ -173,12 +181,6 @@ function baseSignal(input: {
   };
 }
 
-function paymentDueDate(periodMonth: string, dueDay: number): string {
-  const d = new Date(`${periodMonth.slice(0, 7)}-01T00:00:00.000Z`);
-  d.setUTCDate(dueDay);
-  return d.toISOString().slice(0, 10);
-}
-
 // ── Signal scorers ──────────────────────────────────────────────────────────
 
 function gradeSignal(
@@ -234,7 +236,9 @@ function attendanceSignal(
   settings: EscalationSettings,
 ): AttendanceEscalationSignal {
   const startDate = daysBefore(settings.asOfDate, ESCALATION_WINDOW_DAYS);
-  const records = windowed(attendance, startDate, settings.asOfDate);
+  const records = windowed(attendance, startDate, settings.asOfDate).filter(
+    (record) => !settings.calendar || isSchoolDay(record.date, settings.calendar),
+  );
   const absences = records.filter((record) => record.status === "absent");
   const tardies = records.filter((record) => record.status === "tardy");
   const occurrences = absences.length + tardies.length;
@@ -267,7 +271,15 @@ function quranSignal(
   });
   const pattern =
     summary.pattern.status === "classified" ? summary.pattern.pattern : null;
-  const daysSinceLastEntry = summary.pattern.daysSinceLastEntry;
+  const rawDaysSinceLastEntry = summary.pattern.daysSinceLastEntry;
+  const latestDate = entries
+    .map((entry) => entry.date)
+    .sort()
+    .at(-1);
+  const daysSinceLastEntry =
+    latestDate && settings.calendar
+      ? schoolDaysSince(latestDate, settings.asOfDate, settings.calendar)
+      : rawDaysSinceLastEntry;
   const tripped = pattern === "stagnant" || pattern === "irregular";
   const occurrences =
     pattern === "stagnant" && daysSinceLastEntry !== null
@@ -275,40 +287,49 @@ function quranSignal(
       : tripped
         ? 1
         : 0;
-  const latestDate = entries
-    .map((entry) => entry.date)
-    .sort()
-    .at(-1);
+  const calendarAdjustedPattern =
+    settings.calendar && daysSinceLastEntry !== null
+      ? daysSinceLastEntry >= settings.quranInactivityDays
+        ? pattern
+        : pattern === "stagnant"
+          ? null
+          : pattern
+      : pattern;
+  const calendarAdjustedTripped =
+    calendarAdjustedPattern === "stagnant" || calendarAdjustedPattern === "irregular";
+  const calendarAdjustedOccurrences =
+    calendarAdjustedPattern === "stagnant" && daysSinceLastEntry !== null
+      ? Math.max(1, Math.floor(daysSinceLastEntry / settings.quranInactivityDays))
+      : calendarAdjustedTripped
+        ? 1
+        : 0;
   const signal = baseSignal({
-    occurrences,
+    occurrences: settings.calendar ? calendarAdjustedOccurrences : occurrences,
     dates: latestDate ? [latestDate] : [],
     asOfDate: settings.asOfDate,
     details:
-      tripped && daysSinceLastEntry !== null
-        ? `${pattern} Quran pattern, ${daysSinceLastEntry} days since last entry`
+      (settings.calendar ? calendarAdjustedTripped : tripped) &&
+      daysSinceLastEntry !== null
+        ? `${calendarAdjustedPattern} Quran pattern, ${daysSinceLastEntry} school days since last entry`
         : "No persistent Quran slippage",
   });
 
-  return { ...signal, pattern, daysSinceLastEntry };
+  return { ...signal, pattern: calendarAdjustedPattern, daysSinceLastEntry };
 }
 
 function paymentSignal(
   payments: EscalationPaymentEntry[],
   settings: EscalationSettings,
+  enrollmentAnchorDate: string | null | undefined,
 ): PaymentEscalationSignal {
-  const startDate = daysBefore(settings.asOfDate, ESCALATION_WINDOW_DAYS);
-  const overdue = payments
-    .filter((payment) => payment.status !== "paid")
-    .map((payment) => ({
-      ...payment,
-      dueDate: paymentDueDate(payment.periodMonth, settings.paymentDueDay),
-    }))
-    .filter(
-      (payment) =>
-        payment.dueDate >= startDate && payment.dueDate <= settings.asOfDate,
-    );
+  const overdue = computeOverduePaymentCycles({
+    asOfDate: settings.asOfDate,
+    paymentDueDay: settings.paymentDueDay,
+    enrollmentAnchorDate: enrollmentAnchorDate ?? null,
+    cycles: payments,
+  });
   const maxDaysOverdue = overdue.reduce(
-    (max, payment) => Math.max(max, daysBetween(payment.dueDate, settings.asOfDate)),
+    (max, payment) => Math.max(max, payment.daysOverdue),
     0,
   );
   const signal = baseSignal({
@@ -336,7 +357,11 @@ export function computeStudentEscalations(
         grades: gradeSignal(student.grades, settings),
         attendance: attendanceSignal(student.attendance, settings),
         quran: quranSignal(student.quranProgress, settings),
-        payments: paymentSignal(student.payments, settings),
+        payments: paymentSignal(
+          student.payments,
+          settings,
+          student.enrollmentAnchorDate,
+        ),
       };
       const signalList = Object.entries(signals) as [
         EscalationSignalKey,

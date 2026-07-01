@@ -1,5 +1,11 @@
 import { createServiceClient } from "@/lib/supabase/server";
 import { sendSms, type SendSmsInput, type SmsResult } from "@/lib/sms/send-sms";
+import { getServiceSchoolCalendar } from "@/lib/schedule/calendar-data";
+import {
+  isSchoolDay,
+  schoolDaysSince,
+  type SchoolCalendarConfig,
+} from "@/lib/schedule/calendar";
 
 type GuardianRecipient = {
   full_name: string;
@@ -25,10 +31,12 @@ export type QuranSettings = {
 
 export type QuranAlertDatabase = {
   getQuranSettings(): Promise<QuranSettings>;
+  getSchoolCalendar(): Promise<SchoolCalendarConfig>;
   getAdminRecipients(): Promise<AdminRecipient[]>;
   getSlippingStudents(
     inactivityDays: number,
     asOfDate: string,
+    calendar: SchoolCalendarConfig,
   ): Promise<QuranSlipStudent[]>;
 };
 
@@ -46,14 +54,29 @@ function studentName(s: Pick<QuranSlipStudent, "first_name" | "last_name">) {
   return `${s.first_name} ${s.last_name}`.trim();
 }
 
-function isoDate(d: Date) {
-  return d.toISOString().slice(0, 10);
-}
+export function evaluateQuranInactivity(input: {
+  lastLessonDate: string | null;
+  asOfDate: string;
+  inactivitySchoolDays: number;
+  calendar: SchoolCalendarConfig;
+}) {
+  if (!input.lastLessonDate) {
+    return {
+      slipping: true,
+      schoolDaysSinceLastLesson: input.inactivitySchoolDays + 1,
+    };
+  }
 
-function addDays(date: Date, days: number): Date {
-  const d = new Date(date);
-  d.setUTCDate(d.getUTCDate() + days);
-  return d;
+  const schoolDaysSinceLastLesson = schoolDaysSince(
+    input.lastLessonDate,
+    input.asOfDate,
+    input.calendar,
+  );
+
+  return {
+    slipping: schoolDaysSinceLastLesson >= input.inactivitySchoolDays,
+    schoolDaysSinceLastLesson,
+  };
 }
 
 export function createSupabaseQuranAlertDatabase(): QuranAlertDatabase {
@@ -70,6 +93,10 @@ export function createSupabaseQuranAlertDatabase(): QuranAlertDatabase {
       return { quranInactivityDays: Number(data.quran_inactivity_days) };
     },
 
+    async getSchoolCalendar() {
+      return getServiceSchoolCalendar();
+    },
+
     async getAdminRecipients() {
       const { data, error } = await supabase
         .from("profiles")
@@ -80,7 +107,7 @@ export function createSupabaseQuranAlertDatabase(): QuranAlertDatabase {
       return (data ?? []) as AdminRecipient[];
     },
 
-    async getSlippingStudents(inactivityDays, asOfDate) {
+    async getSlippingStudents(inactivityDays, asOfDate, calendar) {
       // Find all active students.
       const { data: allStudents, error: studentsError } = await supabase
         .from("students")
@@ -109,15 +136,16 @@ export function createSupabaseQuranAlertDatabase(): QuranAlertDatabase {
         }
       }
 
-      const cutoff = isoDate(
-        addDays(new Date(`${asOfDate}T00:00:00.000Z`), -inactivityDays),
-      );
-
-      // A student slips when their most recent lesson date is before the cutoff,
-      // OR they have no entries at all and were enrolled before the cutoff.
+      // A student slips when their most recent lesson is at least the configured
+      // number of school days old, or they have no entries yet.
       const slippingIds = studentIds.filter((id) => {
         const last = latestDate.get(id);
-        return !last || last < cutoff;
+        return evaluateQuranInactivity({
+          lastLessonDate: last ?? null,
+          asOfDate,
+          inactivitySchoolDays: inactivityDays,
+          calendar,
+        }).slipping;
       });
 
       if (slippingIds.length === 0) return [];
@@ -148,18 +176,16 @@ export function createSupabaseQuranAlertDatabase(): QuranAlertDatabase {
         guardianMap.set(row.student_id, list);
       }
 
-      const asOfMs = new Date(`${asOfDate}T00:00:00.000Z`).getTime();
-
       return students
         .filter((s) => slippingIds.includes(s.id as string))
         .map((s) => {
           const last = latestDate.get(s.id as string);
-          const daysSince = last
-            ? Math.floor(
-                (asOfMs - new Date(`${last}T00:00:00.000Z`).getTime()) /
-                  (1000 * 60 * 60 * 24),
-              )
-            : inactivityDays + 1;
+          const daysSince = evaluateQuranInactivity({
+            lastLessonDate: last ?? null,
+            asOfDate,
+            inactivitySchoolDays: inactivityDays,
+            calendar,
+          }).schoolDaysSinceLastLesson;
           return {
             id: s.id as string,
             first_name: s.first_name as string,
@@ -178,10 +204,17 @@ export async function checkQuranSlipAlerts(
 ): Promise<AlertResult> {
   const database = deps.database ?? createSupabaseQuranAlertDatabase();
   const send = deps.sendSms ?? sendSms;
-  const settings = await database.getQuranSettings();
+  const [settings, calendar] = await Promise.all([
+    database.getQuranSettings(),
+    database.getSchoolCalendar(),
+  ]);
+
+  if (!isSchoolDay(asOfDate, calendar)) {
+    return { students: 0, messages: 0 };
+  }
 
   const [students, admins] = await Promise.all([
-    database.getSlippingStudents(settings.quranInactivityDays, asOfDate),
+    database.getSlippingStudents(settings.quranInactivityDays, asOfDate, calendar),
     database.getAdminRecipients(),
   ]);
 

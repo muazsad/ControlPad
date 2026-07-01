@@ -7,6 +7,10 @@ import {
   type AttendanceAlertDatabase,
 } from "./attendance";
 import type { SendSmsInput } from "@/lib/sms/send-sms";
+import {
+  DEFAULT_WEEKLY_PATTERN,
+  type SchoolCalendarConfig,
+} from "@/lib/schedule/calendar";
 
 class FakeAttendanceAlertDatabase implements AttendanceAlertDatabase {
   settings = {
@@ -35,8 +39,18 @@ class FakeAttendanceAlertDatabase implements AttendanceAlertDatabase {
     },
   ];
 
+  calendar: SchoolCalendarConfig = {
+    weeklyPattern: DEFAULT_WEEKLY_PATTERN,
+    breaks: [],
+    specialDays: [],
+  };
+
   async getAttendanceSettings() {
     return this.settings;
+  }
+
+  async getSchoolCalendar() {
+    return this.calendar;
   }
 
   async getAdminRecipients() {
@@ -59,8 +73,8 @@ describe("attendance alerts", () => {
 
     const result = await checkAbsenceAlerts(
       {
-        date: "2026-06-26",
-        now: new Date("2026-06-26T10:01:00-04:00"),
+        date: "2026-06-25",
+        now: new Date("2026-06-25T10:01:00-04:00"),
       },
       {
         database,
@@ -81,7 +95,7 @@ describe("attendance alerts", () => {
     assert.equal(sent[0].triggerType, "absence");
     assert.equal(sent[0].dedupeWindowHours, 24);
     assert.match(sent[0].body, /Amina Noor/);
-    assert.match(sent[0].body, /2026-06-26/);
+    assert.match(sent[0].body, /2026-06-25/);
   });
 
   it("skips absence alerts before settings.school_start plus settings.tardy_window_hours", async () => {
@@ -90,8 +104,8 @@ describe("attendance alerts", () => {
 
     const result = await checkAbsenceAlerts(
       {
-        date: "2026-06-26",
-        now: new Date("2026-06-26T09:59:00-04:00"),
+        date: "2026-06-25",
+        now: new Date("2026-06-25T09:59:00-04:00"),
       },
       {
         database,
@@ -107,13 +121,71 @@ describe("attendance alerts", () => {
     assert.equal(sent.length, 0);
   });
 
+  it("does not flag an absence on a Friday off-day", async () => {
+    const database = new FakeAttendanceAlertDatabase();
+    const sent: SendSmsInput[] = [];
+
+    const result = await checkAbsenceAlerts(
+      {
+        date: "2026-07-03",
+        now: new Date("2026-07-03T12:00:00-04:00"),
+      },
+      {
+        database,
+        sendSms: async (input) => {
+          sent.push(input);
+          return { status: "queued", notification: {} };
+        },
+      },
+    );
+
+    assert.equal(result.checked, false);
+    assert.equal(result.students, 0);
+    assert.equal(result.messages, 0);
+    assert.equal(sent.length, 0);
+  });
+
+  it("uses a half-day start time for the absence window when configured", async () => {
+    const database = new FakeAttendanceAlertDatabase();
+    database.calendar = {
+      weeklyPattern: DEFAULT_WEEKLY_PATTERN,
+      breaks: [],
+      specialDays: [
+        {
+          date: "2026-07-07",
+          type: "half_day",
+          startTime: "09:00",
+          endTime: "12:00",
+        },
+      ],
+    };
+    const sent: SendSmsInput[] = [];
+
+    const result = await checkAbsenceAlerts(
+      {
+        date: "2026-07-07",
+        now: new Date("2026-07-07T10:30:00-04:00"),
+      },
+      {
+        database,
+        sendSms: async (input) => {
+          sent.push(input);
+          return { status: "queued", notification: {} };
+        },
+      },
+    );
+
+    assert.equal(result.checked, false);
+    assert.equal(sent.length, 0);
+  });
+
   it("sends tardy threshold alerts to guardians using settings.tardies_per_week", async () => {
     const database = new FakeAttendanceAlertDatabase();
     const sent: SendSmsInput[] = [];
 
     const result = await checkTardyThresholdAlerts(
       {
-        date: "2026-06-26",
+        date: "2026-06-25",
       },
       {
         database,

@@ -140,6 +140,43 @@ create table settings (
 );
 insert into settings (id) values (1) on conflict do nothing;
 
+-- Single-row editable weekly calendar pattern.
+-- Default: Mon/Tue/Wed/Thu/Sat on; Fri/Sun off.
+create table school_weekly_patterns (
+  id          int primary key default 1 check (id = 1),
+  sunday      boolean not null default false,
+  monday      boolean not null default true,
+  tuesday     boolean not null default true,
+  wednesday   boolean not null default true,
+  thursday    boolean not null default true,
+  friday      boolean not null default false,
+  saturday    boolean not null default true,
+  updated_at  timestamptz not null default now()
+);
+insert into school_weekly_patterns (id) values (1) on conflict do nothing;
+
+-- No-school ranges such as winter break.
+create table school_breaks (
+  id          uuid primary key default gen_random_uuid(),
+  name        text not null,
+  start_date  date not null,
+  end_date    date not null,
+  created_at  timestamptz not null default now(),
+  updated_at  timestamptz not null default now(),
+  check (end_date >= start_date)
+);
+
+-- Date-specific overrides. A special week is represented by one row per date.
+create table school_special_days (
+  date        date primary key,
+  type        text not null check (type in ('no_school', 'half_day')),
+  start_time  time,
+  end_time    time,
+  note        text,
+  created_at  timestamptz not null default now(),
+  updated_at  timestamptz not null default now()
+);
+
 -- Audit log of every alert; also used to avoid duplicate sends
 create table notifications (
   id              uuid primary key default gen_random_uuid(),
@@ -179,6 +216,7 @@ as $$ select role from public.profiles where id = auth.uid() $$;
 | guardians, student_guardians | full | read | read **own record / own children** |
 | payments | full | read | read **own children only** |
 | settings | read + write | read | none |
+| school_weekly_patterns, school_breaks, school_special_days | full | read | read |
 | notifications | full | read | read **own** |
 
 **Parent "own children" check** (reusable predicate):
@@ -224,6 +262,9 @@ create policy students_parent_read on students
 - **Weekly tardies** = count of `attendance.status = 'tardy'` in the last 7 days per student.
 - **Quran slip** = days since the latest `quran_progress.date` exceeds `settings.quran_inactivity_days`.
 - **Overdue payment** = no `payments` row with `status='paid'` for the current `period_month` once the day of month passes `settings.payment_due_day`.
+- **School day** = configured weekly pattern minus breaks and `no_school` special days; `half_day`
+  special days count as school days with a half-day type. Alerts will be wired to this calendar
+  in a later phase.
 
 ---
 

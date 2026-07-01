@@ -49,6 +49,8 @@ A guardian can have multiple children; a child can have multiple guardians (many
 
 ### 3.3 Attendance
 - Daily status per student: Present / Tardy / Absent / Excused, marked by moderators.
+- Attendance operates against the configured school calendar: regular school days are editable,
+  breaks are no-school ranges, and special days can mark one-off closures or half days.
 - **Alerts:**
   - Student is absent and has not been marked present/tardy/excused within X hours of the 8am start -> SMS to **parent + admin**.
   - X tardies within a rolling 7-day window -> SMS to **parent**.
@@ -56,6 +58,8 @@ A guardian can have multiple children; a child can have multiple guardians (many
 ### 3.4 Quran / Hifz progress
 - Per student, log each new lesson: date, surah/juz, lines (or ayahs) memorized, running cumulative total.
 - Moderators input lessons; moderators and parents track progress.
+- Quran pacing should use the configured school calendar once alert logic is calendar-aware, so
+  breaks and no-school days do not make students look inactive.
 - **Alert:** a student "slipping" — e.g. no new memorization logged in X days, or rate falling below target -> notify parent (and admin).
 
 ### 3.5 Tuition & billing
@@ -79,6 +83,11 @@ A guardian can have multiple children; a child can have multiple guardians (many
   - Quran inactivity before alert (default **7 days**)
   - Payment due day of month (default **5th**)
   - School start (8am) and admin digest time (3pm)
+- School calendar configuration also lives here:
+  - Weekly pattern of school days. Default: **Monday, Tuesday, Wednesday, Thursday, Saturday on; Friday and Sunday off**.
+  - Breaks as named no-school date ranges.
+  - Special days as date-specific overrides: **no school** or **half day** with optional times and notes.
+  - Special weeks are modeled by bulk-applying special days across a date range, not by a separate table.
 
 > Defaults above are placeholders — change any of them in the app once it's live.
 

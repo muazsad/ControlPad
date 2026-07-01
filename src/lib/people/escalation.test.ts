@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import { computeStudentEscalations } from "./escalation";
+import { DEFAULT_WEEKLY_PATTERN } from "@/lib/schedule/calendar";
 
 const baseStudent = {
   id: "student-1",
@@ -92,6 +93,40 @@ describe("computeStudentEscalations", () => {
     assert.equal(result.signals.attendance.occurrences, 1);
   });
 
+  it("ignores attendance issues recorded on off-days", () => {
+    const [result] = computeStudentEscalations(
+      [
+        {
+          ...baseStudent,
+          grades: [],
+          attendance: [
+            { date: "2026-07-03", status: "absent" },
+            { date: "2026-07-05", status: "tardy" },
+          ],
+          quranProgress: [],
+          payments: [],
+          notifications: [],
+        },
+      ],
+      {
+        asOfDate: "2026-07-07",
+        gradeFloor: 70,
+        tardiesPerWeek: 3,
+        quranInactivityDays: 7,
+        paymentDueDay: 5,
+        calendar: {
+          weeklyPattern: DEFAULT_WEEKLY_PATTERN,
+          breaks: [],
+          specialDays: [],
+        },
+      },
+    );
+
+    assert.equal(result.signals.attendance.tripped, false);
+    assert.equal(result.signals.attendance.occurrences, 0);
+    assert.equal(result.level, "ok");
+  });
+
   it("uses sustained grade drops as grade occurrences", () => {
     const [result] = computeStudentEscalations(
       [
@@ -148,5 +183,62 @@ describe("computeStudentEscalations", () => {
     assert.equal(result.level, "critical");
     assert.equal(result.signals.quran.tripped, true);
     assert.equal(result.signals.quran.daysSinceLastEntry, 26);
+  });
+
+  it("does not flag payment cycles before a student's enrollment anchor", () => {
+    const [result] = computeStudentEscalations(
+      [
+        {
+          ...baseStudent,
+          enrollmentAnchorDate: "2026-07-01",
+          grades: [],
+          attendance: [],
+          quranProgress: [],
+          payments: [
+            { periodMonth: "2026-06-01", status: "unpaid" },
+            { periodMonth: "2026-07-01", status: "paid" },
+          ],
+          notifications: [],
+        },
+      ],
+      {
+        asOfDate: "2026-07-01",
+        gradeFloor: 70,
+        tardiesPerWeek: 3,
+        quranInactivityDays: 7,
+        paymentDueDay: 5,
+      },
+    );
+
+    assert.equal(result.signals.payments.tripped, false);
+    assert.equal(result.signals.payments.overdueCycles, 0);
+    assert.equal(result.level, "ok");
+  });
+
+  it("flags unpaid payment cycles after enrollment once past due", () => {
+    const [result] = computeStudentEscalations(
+      [
+        {
+          ...baseStudent,
+          enrollmentAnchorDate: "2026-06-01",
+          grades: [],
+          attendance: [],
+          quranProgress: [],
+          payments: [{ periodMonth: "2026-06-01", status: "unpaid" }],
+          notifications: [],
+        },
+      ],
+      {
+        asOfDate: "2026-07-01",
+        gradeFloor: 70,
+        tardiesPerWeek: 3,
+        quranInactivityDays: 7,
+        paymentDueDay: 5,
+      },
+    );
+
+    assert.equal(result.signals.payments.tripped, true);
+    assert.equal(result.signals.payments.overdueCycles, 1);
+    assert.equal(result.signals.payments.maxDaysOverdue, 26);
   });
 });
