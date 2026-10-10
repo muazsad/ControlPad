@@ -21,8 +21,9 @@ create type user_role            as enum ('admin', 'moderator', 'parent');
 create type enrollment_status    as enum ('active', 'inactive', 'withdrawn');
 create type attendance_status    as enum ('present', 'tardy', 'absent', 'excused');
 create type payment_status       as enum ('paid', 'unpaid');
-create type notification_trigger as enum ('low_grade','absence','tardy_threshold','quran_slip','payment_overdue','admin_digest');
-create type notification_status  as enum ('queued','sent','failed');
+create type notification_trigger as enum ('low_grade','absence','tardy_threshold','quran_slip','payment_overdue','admin_digest',
+                                          'absence_review','manual_test');   -- last two added Oct 2026
+create type notification_status  as enum ('queued','sent','failed','dry_run'); -- dry_run added Oct 2026
 ```
 
 ---
@@ -189,8 +190,35 @@ create table notifications (
   twilio_sid      text,
   error           text,
   created_at      timestamptz not null default now(),
-  sent_at         timestamptz
+  sent_at         timestamptz,
+  dedupe_key      text,                   -- optional explicit dedupe (batched admin texts)
+  delivery_mode   text                    -- 'off' | 'test' | 'live' at send time
 );
+
+-- Schedule groups (Oct 2026). Students belong to one group; the group decides
+-- which weekdays they attend and their times. Null group = school-wide settings.
+create table schedule_groups (
+  id           uuid primary key default gen_random_uuid(),
+  name         text not null unique,      -- e.g. 'Full time', 'Quran only'
+  description  text,
+  created_at   timestamptz not null default now(),
+  updated_at   timestamptz not null default now()
+);
+
+-- One row per weekday the group attends (0 = Sunday … 6 = Saturday).
+create table schedule_group_days (
+  group_id             uuid not null references schedule_groups(id) on delete cascade,
+  weekday              smallint not null check (weekday between 0 and 6),
+  start_time           time not null,
+  tardy_grace_minutes  int not null default 10,   -- arrival after start + grace = tardy
+  absence_check_time   time not null,             -- admin is texted about unmarked/absent
+  primary key (group_id, weekday)
+);
+
+-- Columns added to existing tables (Oct 2026):
+--   students.schedule_group_id           uuid references schedule_groups(id) on delete set null
+--   attendance.arrived_at                time   (local arrival time)
+--   settings.parent_alert_delay_minutes  int not null default 60
 ```
 
 ---
@@ -217,6 +245,7 @@ as $$ select role from public.profiles where id = auth.uid() $$;
 | payments | full | read | read **own children only** |
 | settings | read + write | read | none |
 | school_weekly_patterns, school_breaks, school_special_days | full | read | read |
+| schedule_groups, schedule_group_days | full | read | read |
 | notifications | full | read | read **own** |
 
 **Parent "own children" check** (reusable predicate):
@@ -259,12 +288,18 @@ create policy students_parent_read on students
 
 - **Current grade** for a course = most recent `grades` row by `recorded_at`.
 - **Grade slipping** = current grade below `settings.grade_floor`, or a downward delta across recent entries.
-- **Weekly tardies** = count of `attendance.status = 'tardy'` in the last 7 days per student.
+- **Weekly tardies** = count of `attendance.status = 'tardy'` over the last 7 school days per student.
+- **Student's day** = their schedule group's row for that weekday (breaks and `no_school` days still
+  apply). Ungrouped students use the school-wide weekly pattern + `settings.school_start`.
+- **Tardy** = `attendance.arrived_at` after the group's `start_time + tardy_grace_minutes`.
+- **Absence escalation** = at `absence_check_time`, admin gets one text per group listing students
+  with no attendance row or `absent`; `parent_alert_delay_minutes` later, parents of students still
+  unmarked/absent are texted.
 - **Quran slip** = days since the latest `quran_progress.date` exceeds `settings.quran_inactivity_days`.
 - **Overdue payment** = no `payments` row with `status='paid'` for the current `period_month` once the day of month passes `settings.payment_due_day`.
 - **School day** = configured weekly pattern minus breaks and `no_school` special days; `half_day`
-  special days count as school days with a half-day type. Alerts will be wired to this calendar
-  in a later phase.
+  special days count as school days with a half-day type. Grouped students keep their group's
+  times on half days.
 
 ---
 

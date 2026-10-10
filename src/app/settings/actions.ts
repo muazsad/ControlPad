@@ -6,6 +6,11 @@ import { requireRole } from "@/lib/auth/current-profile";
 import { createClient } from "@/lib/supabase/server";
 import { WEEKDAY_KEYS, type SpecialDayType } from "@/lib/schedule/calendar";
 
+import {
+  parseScheduleGroupForm,
+  type ScheduleGroupValues,
+} from "@/lib/schedule/schedule-group-validation";
+
 import { parseSettingsForm } from "./settings-validation";
 
 export type SettingsFormState = {
@@ -283,4 +288,104 @@ export async function applySpecialDayRange(formData: FormData) {
   if (error) throw error;
 
   revalidatePath("/settings");
+}
+
+// ── Schedule groups ─────────────────────────────────────────────────────────
+
+export type ScheduleGroupFormState = {
+  error: string | null;
+  success: string | null;
+};
+
+async function saveGroupDays(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  groupId: string,
+  days: ScheduleGroupValues["days"],
+) {
+  const { error: deleteError } = await supabase
+    .from("schedule_group_days")
+    .delete()
+    .eq("group_id", groupId);
+  if (deleteError) return deleteError.message;
+
+  const { error: insertError } = await supabase.from("schedule_group_days").insert(
+    days.map((day) => ({
+      group_id: groupId,
+      weekday: day.weekday,
+      start_time: day.startTime,
+      tardy_grace_minutes: day.tardyGraceMinutes,
+      absence_check_time: day.absenceCheckTime,
+    })),
+  );
+  return insertError?.message ?? null;
+}
+
+function friendlyGroupError(message: string) {
+  return /duplicate key|unique/i.test(message)
+    ? "A group with that name already exists."
+    : message;
+}
+
+export async function createScheduleGroup(
+  _prev: ScheduleGroupFormState,
+  formData: FormData,
+): Promise<ScheduleGroupFormState> {
+  await requireRole(["admin"]);
+
+  const parsed = parseScheduleGroupForm(formData);
+  if (!parsed.ok) return { error: parsed.error, success: null };
+
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("schedule_groups")
+    .insert({ name: parsed.values.name, description: parsed.values.description })
+    .select("id")
+    .single();
+  if (error) return { error: friendlyGroupError(error.message), success: null };
+
+  const daysError = await saveGroupDays(supabase, data.id, parsed.values.days);
+  if (daysError) return { error: daysError, success: null };
+
+  revalidatePath("/settings");
+  revalidatePath("/attendance");
+  return { error: null, success: `Created ${parsed.values.name}.` };
+}
+
+export async function updateScheduleGroup(
+  _prev: ScheduleGroupFormState,
+  formData: FormData,
+): Promise<ScheduleGroupFormState> {
+  await requireRole(["admin"]);
+
+  const id = (formData.get("id") as string | null)?.trim();
+  if (!id) return { error: "Missing group id.", success: null };
+
+  const parsed = parseScheduleGroupForm(formData);
+  if (!parsed.ok) return { error: parsed.error, success: null };
+
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("schedule_groups")
+    .update({ name: parsed.values.name, description: parsed.values.description })
+    .eq("id", id);
+  if (error) return { error: friendlyGroupError(error.message), success: null };
+
+  const daysError = await saveGroupDays(supabase, id, parsed.values.days);
+  if (daysError) return { error: daysError, success: null };
+
+  revalidatePath("/settings");
+  revalidatePath("/attendance");
+  return { error: null, success: `Saved ${parsed.values.name}.` };
+}
+
+export async function deleteScheduleGroup(id: string) {
+  await requireRole(["admin"]);
+
+  const supabase = await createClient();
+  const { error } = await supabase.from("schedule_groups").delete().eq("id", id);
+  if (error) throw error;
+
+  revalidatePath("/settings");
+  revalidatePath("/attendance");
+  revalidatePath("/students");
 }

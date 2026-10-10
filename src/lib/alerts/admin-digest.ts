@@ -85,7 +85,7 @@ type AdminDigestDeps = {
 
 export type AdminDigestSendResult = {
   sent: boolean;
-  skippedReason?: "before_digest_time";
+  skippedReason?: "before_digest_time" | "no_school";
   recipients: number;
   summary: AdminDailySummary;
 };
@@ -464,6 +464,10 @@ export async function sendAdminDigest(
   const database = deps.database ?? createSupabaseAdminDigestDatabase();
   const send = deps.sendSms ?? sendSms;
   const summary = await database.getSummary(input.date);
+
+  if (!input.force && summary.schoolDayType === "off") {
+    return { sent: false, skippedReason: "no_school", recipients: 0, summary };
+  }
 
   if (
     !input.force &&

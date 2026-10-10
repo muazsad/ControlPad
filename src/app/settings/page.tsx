@@ -11,9 +11,11 @@ import {
   type SpecialDay,
   type WeeklyPattern,
 } from "@/lib/schedule/calendar";
+import { getScheduleGroups } from "@/lib/schedule/schedule-groups-data";
 import { createClient } from "@/lib/supabase/server";
 
 import { ScheduleForm } from "./schedule-form";
+import { ScheduleGroupsForm } from "./schedule-groups-form";
 import { SettingsForm } from "./settings-form";
 import type { SettingsValues } from "./settings-validation";
 
@@ -49,7 +51,7 @@ export default async function SettingsPage() {
   const { data, error } = await supabase
     .from("settings")
     .select(
-      "grade_floor, tardy_window_hours, tardies_per_week, quran_inactivity_days, payment_due_day, school_start, admin_digest_time, updated_at",
+      "grade_floor, tardy_window_hours, tardies_per_week, quran_inactivity_days, payment_due_day, school_start, admin_digest_time, parent_alert_delay_minutes, updated_at",
     )
     .eq("id", 1)
     .single();
@@ -60,6 +62,8 @@ export default async function SettingsPage() {
     { data: weeklyPatternData },
     { data: breaksData },
     { data: specialDaysData },
+    scheduleGroups,
+    { data: activeStudents },
   ] = await Promise.all([
     supabase
       .from("school_weekly_patterns")
@@ -74,7 +78,22 @@ export default async function SettingsPage() {
       .from("school_special_days")
       .select("date, type, start_time, end_time, note")
       .order("date", { ascending: true }),
+    getScheduleGroups(),
+    supabase
+      .from("students")
+      .select("schedule_group_id")
+      .eq("enrollment_status", "active"),
   ]);
+
+  const studentCounts: Record<string, number> = {};
+  let ungroupedCount = 0;
+  for (const row of (activeStudents ?? []) as { schedule_group_id: string | null }[]) {
+    if (row.schedule_group_id) {
+      studentCounts[row.schedule_group_id] = (studentCounts[row.schedule_group_id] ?? 0) + 1;
+    } else {
+      ungroupedCount += 1;
+    }
+  }
 
   const weeklyPattern =
     (weeklyPatternData as WeeklyPatternRow | null) ?? DEFAULT_WEEKLY_PATTERN;
@@ -116,6 +135,11 @@ export default async function SettingsPage() {
         ) : (
           <div className="space-y-8">
             <SettingsForm settings={settings} />
+            <ScheduleGroupsForm
+              groups={scheduleGroups}
+              studentCounts={studentCounts}
+              ungroupedCount={ungroupedCount}
+            />
             <ScheduleForm
               weeklyPattern={weeklyPattern}
               breaks={schoolBreaks}

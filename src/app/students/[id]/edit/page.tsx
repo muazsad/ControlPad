@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { requireRole } from "@/lib/auth/current-profile";
 import { studentName, type Student } from "@/lib/people/people";
+import { getScheduleGroups } from "@/lib/schedule/schedule-groups-data";
 import { createClient } from "@/lib/supabase/server";
 import { updateStudent } from "../../actions";
 import { StudentForm } from "../../student-form";
@@ -24,13 +25,14 @@ export default async function EditStudentPage({
   const { data: student } = await supabase
     .from("students")
     .select(
-      "id, first_name, last_name, date_of_birth, grade_level, enrollment_status, gcvs_reference, created_at, updated_at",
+      "id, first_name, last_name, date_of_birth, grade_level, enrollment_status, gcvs_reference, schedule_group_id, created_at, updated_at",
     )
     .eq("id", id)
     .maybeSingle();
 
   if (!student) notFound();
   const s = student as Student;
+  const groups = await getScheduleGroups();
 
   return (
     <AppShell fullName={profile.fullName} role={profile.role}>
@@ -47,6 +49,7 @@ export default async function EditStudentPage({
             <StudentForm
               action={updateStudent}
               student={s}
+              groups={groups}
               submitLabel="Save changes"
             />
           </CardContent>

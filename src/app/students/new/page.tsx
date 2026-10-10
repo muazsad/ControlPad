@@ -6,11 +6,13 @@ import { PageHeader } from "@/components/controlpad/page-header";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { requireRole } from "@/lib/auth/current-profile";
+import { getScheduleGroups } from "@/lib/schedule/schedule-groups-data";
 import { createStudent } from "../actions";
 import { StudentForm } from "../student-form";
 
 export default async function NewStudentPage() {
   const profile = await requireRole(["admin", "moderator"]);
+  const groups = await getScheduleGroups();
 
   return (
     <AppShell fullName={profile.fullName} role={profile.role}>
@@ -27,7 +29,11 @@ export default async function NewStudentPage() {
         />
         <Card className="border shadow-sm">
           <CardContent className="pt-6">
-            <StudentForm action={createStudent} submitLabel="Create student" />
+            <StudentForm
+              action={createStudent}
+              groups={groups}
+              submitLabel="Create student"
+            />
           </CardContent>
         </Card>
       </div>

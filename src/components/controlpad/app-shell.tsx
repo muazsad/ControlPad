@@ -9,6 +9,7 @@ import {
   CreditCard,
   Gauge,
   GraduationCap,
+  MessageSquare,
   Settings,
   ShieldCheck,
   Trophy,
@@ -47,6 +48,7 @@ const operationalNav: NavItem[] = [
 
 const adminOnlyNav: NavItem[] = [
   { href: "/tuition", label: "Tuition", icon: CreditCard },
+  { href: "/messages", label: "Messages", icon: MessageSquare },
   { href: "/staff", label: "Staff", icon: ShieldCheck },
   { href: "/settings", label: "Settings", icon: Settings },
 ];

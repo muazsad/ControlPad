@@ -6,6 +6,7 @@ export type SettingsValues = {
   payment_due_day: number;
   school_start: string;
   admin_digest_time: string;
+  parent_alert_delay_minutes: number;
 };
 
 export type SettingsParseResult =
@@ -110,6 +111,15 @@ export function parseSettingsForm(formData: FormData): SettingsParseResult {
   );
   if (typeof paymentDueDay !== "number") return paymentDueDay;
 
+  const parentAlertDelayMinutes = integerInRange(
+    formData,
+    "parent_alert_delay_minutes",
+    "Parent alert delay",
+    0,
+    480,
+  );
+  if (typeof parentAlertDelayMinutes !== "number") return parentAlertDelayMinutes;
+
   const schoolStart = timeValue(formData, "school_start", "School start");
   if (typeof schoolStart !== "string") return schoolStart;
 
@@ -130,6 +140,7 @@ export function parseSettingsForm(formData: FormData): SettingsParseResult {
       payment_due_day: paymentDueDay,
       school_start: schoolStart,
       admin_digest_time: adminDigestTime,
+      parent_alert_delay_minutes: parentAlertDelayMinutes,
     },
   };
 }

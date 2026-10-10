@@ -124,7 +124,16 @@ export function SettingsForm({ settings }: Props) {
             max={8}
             step={0.25}
             defaultValue={settings.tardy_window_hours}
-            hint="Hours after school start before absence alerts run."
+            hint="For students without a schedule group: hours after school start before the admin is alerted about missing students."
+          />
+          <Field
+            label="Parent alert delay"
+            name="parent_alert_delay_minutes"
+            min={0}
+            max={480}
+            step={5}
+            defaultValue={settings.parent_alert_delay_minutes}
+            hint="Minutes after the admin is alerted about missing students before their parents are texted, if nobody has corrected attendance."
           />
           <Field
             label="Tardies per week"
@@ -169,7 +178,7 @@ export function SettingsForm({ settings }: Props) {
             name="school_start"
             type="time"
             defaultValue={settings.school_start.slice(0, 5)}
-            hint="Start time used with the tardy window."
+            hint="For students without a schedule group. Grouped students use their group's times below."
           />
           <Field
             label="Admin digest time"

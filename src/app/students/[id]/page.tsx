@@ -119,13 +119,22 @@ export default async function StudentDetailPage({
   const { data: student } = await supabase
     .from("students")
     .select(
-      "id, first_name, last_name, date_of_birth, grade_level, enrollment_status, gcvs_reference, created_at, updated_at",
+      "id, first_name, last_name, date_of_birth, grade_level, enrollment_status, gcvs_reference, schedule_group_id, created_at, updated_at",
     )
     .eq("id", id)
     .maybeSingle();
 
   if (!student) notFound();
   const s = student as Student;
+  const scheduleGroupName = s.schedule_group_id
+    ? (
+        await supabase
+          .from("schedule_groups")
+          .select("name")
+          .eq("id", s.schedule_group_id)
+          .maybeSingle()
+      ).data?.name ?? null
+    : null;
 
   const thirtyDaysAgo = new Date();
   thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
@@ -294,6 +303,10 @@ export default async function StudentDetailPage({
               <Detail label="Date of birth" value={s.date_of_birth} />
               <Detail label="Grade level" value={s.grade_level} />
               <Detail label="GCVS reference" value={s.gcvs_reference} />
+              <Detail
+                label="Schedule group"
+                value={scheduleGroupName ?? "School-wide schedule"}
+              />
               <Detail
                 label="Enrollment"
                 value={s.enrollment_status}

@@ -12,6 +12,8 @@ export type Student = {
   grade_level: string | null;
   enrollment_status: EnrollmentStatus;
   gcvs_reference: string | null;
+  /** Null = uses the school-wide schedule. Only selected where needed. */
+  schedule_group_id?: string | null;
   created_at: string;
   updated_at: string;
 };

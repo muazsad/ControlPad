@@ -4,7 +4,6 @@ import { getServiceSchoolCalendar } from "@/lib/schedule/calendar-data";
 import {
   isSchoolDay,
   schoolDayWindowEnding,
-  schoolStartForDate,
   type SchoolCalendarConfig,
 } from "@/lib/schedule/calendar";
 
@@ -41,7 +40,6 @@ export type AttendanceAlertDatabase = {
   getAttendanceSettings(): Promise<AttendanceSettings>;
   getSchoolCalendar(): Promise<SchoolCalendarConfig>;
   getAdminRecipients(): Promise<Recipient[]>;
-  getAbsentStudentsForDate(date: string): Promise<AttendanceAlertStudent[]>;
   getStudentsAtTardyThreshold(input: {
     endDate: string;
     schoolDates: string[];
@@ -54,11 +52,6 @@ type AlertDeps = {
   sendSms?: (input: SendSmsInput) => Promise<SmsResult>;
 };
 
-type AbsenceAlertInput = {
-  date: string;
-  now?: Date;
-};
-
 type TardyAlertInput = {
   date: string;
 };
@@ -67,22 +60,6 @@ type AlertResult = {
   checked: boolean;
   students: number;
   messages: number;
-};
-
-type AttendanceRow = {
-  student_id: string;
-  students:
-    | {
-        id: string;
-        first_name: string;
-        last_name: string;
-      }
-    | {
-        id: string;
-        first_name: string;
-        last_name: string;
-      }[]
-    | null;
 };
 
 type GuardianLinkRow = {
@@ -124,11 +101,6 @@ function studentName(student: Pick<AttendanceAlertStudent, "first_name" | "last_
   return `${student.first_name} ${student.last_name}`.trim();
 }
 
-function parseTimeToMinutes(time: string) {
-  const [hour = "0", minute = "0"] = time.split(":");
-  return Number(hour) * 60 + Number(minute);
-}
-
 function schoolDateParts(now: Date) {
   const parts = new Intl.DateTimeFormat("en-US", {
     timeZone: SCHOOL_TIME_ZONE,
@@ -150,21 +122,6 @@ function schoolDateParts(now: Date) {
 
 export function todayInSchoolTimeZone(now = new Date()) {
   return schoolDateParts(now).date;
-}
-
-function hasAbsenceWindowOpened(input: {
-  date: string;
-  now: Date;
-  schoolStart: string;
-  tardyWindowHours: number;
-}) {
-  const current = schoolDateParts(input.now);
-  if (current.date > input.date) return true;
-  if (current.date < input.date) return false;
-
-  const windowMinutes =
-    parseTimeToMinutes(input.schoolStart) + input.tardyWindowHours * 60;
-  return current.minutes >= windowMinutes;
 }
 
 async function guardianMapForStudents(studentIds: string[]) {
@@ -220,33 +177,6 @@ export function createSupabaseAttendanceAlertDatabase(): AttendanceAlertDatabase
       if (error) throw new Error(error.message);
       return (data ?? []) as Recipient[];
     },
-    async getAbsentStudentsForDate(date) {
-      const { data, error } = await supabase
-        .from("attendance")
-        .select("student_id, students(id, first_name, last_name)")
-        .eq("date", date)
-        .eq("status", "absent");
-
-      if (error) throw new Error(error.message);
-
-      const rows = (data ?? []) as AttendanceRow[];
-      const guardianMap = await guardianMapForStudents(
-        rows.map((row) => row.student_id),
-      );
-
-      return rows
-        .map((row) => {
-          const student = firstRelated(row.students);
-          if (!student) return null;
-          return {
-            id: student.id,
-            first_name: student.first_name,
-            last_name: student.last_name,
-            guardians: guardianMap.get(student.id) ?? [],
-          };
-        })
-        .filter((student): student is AttendanceAlertStudent => Boolean(student));
-    },
     async getStudentsAtTardyThreshold({ endDate, schoolDates, tardiesPerWeek }) {
       if (schoolDates.length === 0) return [];
 
@@ -294,68 +224,6 @@ export function createSupabaseAttendanceAlertDatabase(): AttendanceAlertDatabase
         .filter((student): student is TardyThresholdStudent => Boolean(student));
     },
   };
-}
-
-export async function checkAbsenceAlerts(
-  input: AbsenceAlertInput,
-  deps: AlertDeps = {},
-): Promise<AlertResult> {
-  const database = deps.database ?? createSupabaseAttendanceAlertDatabase();
-  const send = deps.sendSms ?? sendSms;
-  const [settings, calendar] = await Promise.all([
-    database.getAttendanceSettings(),
-    database.getSchoolCalendar(),
-  ]);
-
-  if (!isSchoolDay(input.date, calendar)) {
-    return { checked: false, students: 0, messages: 0 };
-  }
-
-  if (
-    !hasAbsenceWindowOpened({
-      date: input.date,
-      now: input.now ?? new Date(),
-      schoolStart: schoolStartForDate(input.date, calendar, settings.schoolStart),
-      tardyWindowHours: settings.tardyWindowHours,
-    })
-  ) {
-    return { checked: false, students: 0, messages: 0 };
-  }
-
-  const [students, admins] = await Promise.all([
-    database.getAbsentStudentsForDate(input.date),
-    database.getAdminRecipients(),
-  ]);
-  const messages: SendSmsInput[] = [];
-
-  for (const student of students) {
-    const body = `${studentName(student)} is still marked absent for ${input.date}. Please review attendance in ControlPad.`;
-    for (const guardian of student.guardians) {
-      messages.push({
-        recipientPhone: guardian.phone,
-        recipientType: "parent",
-        studentId: student.id,
-        triggerType: "absence",
-        body,
-        dedupeWindowHours: 24,
-      });
-    }
-    for (const admin of admins) {
-      if (!admin.phone) continue;
-      messages.push({
-        recipientPhone: admin.phone,
-        recipientType: "admin",
-        studentId: student.id,
-        triggerType: "absence",
-        body,
-        dedupeWindowHours: 24,
-      });
-    }
-  }
-
-  await Promise.all(messages.map((message) => send(message)));
-
-  return { checked: true, students: students.length, messages: messages.length };
 }
 
 export async function checkTardyThresholdAlerts(

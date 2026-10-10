@@ -6,7 +6,9 @@ export type NotificationTrigger =
   | "tardy_threshold"
   | "quran_slip"
   | "payment_overdue"
-  | "admin_digest";
+  | "admin_digest"
+  | "absence_review"
+  | "manual_test";
 
 export type RecipientType = "admin" | "parent";
 
@@ -17,11 +19,30 @@ export type SendSmsInput = {
   triggerType: NotificationTrigger;
   body: string;
   dedupeWindowHours?: number;
+  /** When set, dedupe on this key (per recipient) instead of student + trigger. */
+  dedupeKey?: string | null;
+};
+
+/**
+ * How texts are handled:
+ * - off:  nothing is sent; each message is logged with status "dry_run".
+ * - test: every message goes to SMS_TEST_NUMBER instead of the real recipient.
+ * - live: messages go to the real recipient.
+ */
+export type SmsMode = "off" | "test" | "live";
+
+export type SmsConfig = {
+  mode: SmsMode;
+  /** Why the mode is what it is — shown on the Messages page. */
+  reason: string;
+  twilio: { accountSid: string; authToken: string; fromPhone: string } | null;
+  testNumber: string | null;
 };
 
 export type SmsResult =
   | { status: "duplicate"; notification: unknown }
   | { status: "queued"; notification: unknown }
+  | { status: "dry_run"; notification: unknown }
   | { status: "sent"; notification: unknown }
   | { status: "failed"; notification: unknown; error: string };
 
@@ -31,6 +52,7 @@ export type SmsDatabase = {
     studentId: string | null;
     triggerType: NotificationTrigger;
     since: Date;
+    dedupeKey?: string | null;
   }): Promise<unknown | null>;
   insertNotification(row: {
     recipient_phone: string;
@@ -38,7 +60,9 @@ export type SmsDatabase = {
     student_id: string | null;
     trigger_type: NotificationTrigger;
     body: string;
-    status: "queued" | "sent" | "failed";
+    status: "queued" | "sent" | "failed" | "dry_run";
+    dedupe_key?: string | null;
+    delivery_mode?: SmsMode;
     twilio_sid?: string | null;
     error?: string | null;
     sent_at?: string | null;
@@ -83,23 +107,80 @@ function requiredTwilioEnv(env: NodeJS.ProcessEnv | Record<string, string | unde
   return { accountSid, authToken, fromPhone };
 }
 
+/** Reads SMS_MODE / Twilio / SMS_TEST_NUMBER env vars. Never returns secrets to the client. */
+export function getSmsConfig(
+  env: NodeJS.ProcessEnv | Record<string, string | undefined> = process.env,
+): SmsConfig {
+  const twilio = requiredTwilioEnv(env);
+  const testNumber = env.SMS_TEST_NUMBER?.trim() || null;
+  const requested = env.SMS_MODE?.trim().toLowerCase();
+
+  if (requested === "off") {
+    return { mode: "off", reason: "SMS_MODE is off.", twilio, testNumber };
+  }
+  if (!twilio) {
+    return {
+      mode: "off",
+      reason: "Twilio is not configured yet (TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_PHONE_NUMBER).",
+      twilio: null,
+      testNumber,
+    };
+  }
+  if (requested === "test") {
+    if (!testNumber) {
+      return {
+        mode: "off",
+        reason: "SMS_MODE is test but SMS_TEST_NUMBER is not set.",
+        twilio,
+        testNumber: null,
+      };
+    }
+    return { mode: "test", reason: "SMS_MODE is test.", twilio, testNumber };
+  }
+  if (requested && requested !== "live") {
+    return {
+      mode: "off",
+      reason: `Unknown SMS_MODE "${requested}" (use off, test, or live).`,
+      twilio,
+      testNumber,
+    };
+  }
+  return { mode: "live", reason: "Twilio is configured.", twilio, testNumber };
+}
+
+/** "+14135550101" → "•••0101" — avoid showing full numbers in logs/UI. */
+export function maskPhone(phone: string): string {
+  const digits = phone.replace(/\D/g, "");
+  return digits.length >= 4 ? `•••${digits.slice(-4)}` : "•••";
+}
+
 export function createSupabaseSmsDatabase(): SmsDatabase {
   const supabase = createServiceClient();
 
   return {
-    async findRecentNotification({ recipientPhone, studentId, triggerType, since }) {
+    async findRecentNotification({
+      recipientPhone,
+      studentId,
+      triggerType,
+      since,
+      dedupeKey,
+    }) {
       let query = supabase
         .from("notifications")
         .select("id, created_at")
         .eq("recipient_phone", recipientPhone)
-        .eq("trigger_type", triggerType)
         .gte("created_at", since.toISOString())
         .limit(1);
 
-      query =
-        studentId === null
-          ? query.is("student_id", null)
-          : query.eq("student_id", studentId);
+      if (dedupeKey) {
+        query = query.eq("dedupe_key", dedupeKey);
+      } else {
+        query = query.eq("trigger_type", triggerType);
+        query =
+          studentId === null
+            ? query.is("student_id", null)
+            : query.eq("student_id", studentId);
+      }
 
       const { data, error } = await query.maybeSingle();
       if (error) throw new Error(error.message);
@@ -143,13 +224,15 @@ export async function sendSms(
     studentId: input.studentId,
     triggerType: input.triggerType,
     since,
+    dedupeKey: input.dedupeKey ?? null,
   });
 
   if (duplicate) {
     return { status: "duplicate", notification: duplicate };
   }
 
-  const twilioEnv = requiredTwilioEnv(env);
+  const config = getSmsConfig(env);
+  const twilioEnv = config.mode === "off" ? null : config.twilio;
 
   const notification = await database.insertNotification({
     recipient_phone: input.recipientPhone,
@@ -157,15 +240,24 @@ export async function sendSms(
     student_id: input.studentId,
     trigger_type: input.triggerType,
     body: input.body,
-    status: "queued",
-    error: twilioEnv
-      ? null
-      : "SMS dry run: Twilio environment variables are not configured.",
+    status: twilioEnv ? "queued" : "dry_run",
+    dedupe_key: input.dedupeKey ?? null,
+    delivery_mode: config.mode,
+    error: twilioEnv ? null : `Not sent: ${config.reason}`,
   });
 
   if (!twilioEnv) {
-    return { status: "queued", notification };
+    return { status: "dry_run", notification };
   }
+
+  const toPhone =
+    config.mode === "test" && config.testNumber
+      ? config.testNumber
+      : input.recipientPhone;
+  const outgoingBody =
+    config.mode === "test"
+      ? `[TEST to ${input.recipientType} ${maskPhone(input.recipientPhone)}] ${input.body}`
+      : input.body;
 
   const notificationId = getNotificationId(notification);
   const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${twilioEnv.accountSid}/Messages.json`;
@@ -181,9 +273,9 @@ export async function sendSms(
         "Content-Type": "application/x-www-form-urlencoded",
       },
       body: new URLSearchParams({
-        To: input.recipientPhone,
+        To: toPhone,
         From: twilioEnv.fromPhone,
-        Body: input.body,
+        Body: outgoingBody,
       }),
     });
 

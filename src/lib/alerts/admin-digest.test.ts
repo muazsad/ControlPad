@@ -244,4 +244,26 @@ describe("admin digest", () => {
     assert.equal(result.recipients, 0);
     assert.equal(sent.length, 0);
   });
+
+  it("skips scheduled sends on no-school days unless forced", async () => {
+    const sent: SendSmsInput[] = [];
+
+    const result = await sendAdminDigest(
+      {
+        date: "2026-07-03",
+        now: new Date("2026-07-03T16:00:00-04:00"),
+      },
+      {
+        database: new FakeAdminDigestDatabase({ ...emptySummary, schoolDayType: "off" }),
+        sendSms: async (input) => {
+          sent.push(input);
+          return { status: "queued", notification: {} };
+        },
+      },
+    );
+
+    assert.equal(result.sent, false);
+    assert.equal(result.skippedReason, "no_school");
+    assert.equal(sent.length, 0);
+  });
 });

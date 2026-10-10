@@ -19,6 +19,7 @@ const validSettings = {
   payment_due_day: "5",
   school_start: "08:00",
   admin_digest_time: "15:00",
+  parent_alert_delay_minutes: "60",
 };
 
 describe("parseSettingsForm", () => {
@@ -33,6 +34,7 @@ describe("parseSettingsForm", () => {
         payment_due_day: 5,
         school_start: "08:00",
         admin_digest_time: "15:00",
+        parent_alert_delay_minutes: 60,
       },
     });
   });

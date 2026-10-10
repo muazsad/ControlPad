@@ -18,6 +18,15 @@ function nullable(form: FormData, key: string): string | null {
   return value === "" ? null : value;
 }
 
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** Empty = no group (school-wide schedule). */
+function parseScheduleGroup(form: FormData): string | null {
+  const value = text(form, "schedule_group_id");
+  return UUID_PATTERN.test(value) ? value : null;
+}
+
 function parseEnrollment(value: string): EnrollmentStatus {
   return (enrollmentStatuses as string[]).includes(value)
     ? (value as EnrollmentStatus)
@@ -47,6 +56,7 @@ export async function createStudent(
       grade_level: nullable(form, "grade_level"),
       enrollment_status: parseEnrollment(text(form, "enrollment_status")),
       gcvs_reference: nullable(form, "gcvs_reference"),
+      schedule_group_id: parseScheduleGroup(form),
     })
     .select("id")
     .single();
@@ -81,6 +91,7 @@ export async function updateStudent(
       grade_level: nullable(form, "grade_level"),
       enrollment_status: parseEnrollment(text(form, "enrollment_status")),
       gcvs_reference: nullable(form, "gcvs_reference"),
+      schedule_group_id: parseScheduleGroup(form),
     })
     .eq("id", id);
 

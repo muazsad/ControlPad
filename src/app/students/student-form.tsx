@@ -20,11 +20,15 @@ import {
   type EnrollmentStatus,
   type Student,
 } from "@/lib/people/people";
+import type { ScheduleGroup } from "@/lib/schedule/student-schedule";
 import type { ActionState } from "./actions";
+
+const NO_GROUP = "none";
 
 type StudentFormProps = {
   action: (state: ActionState, form: FormData) => Promise<ActionState>;
   student?: Student;
+  groups: Pick<ScheduleGroup, "id" | "name">[];
   submitLabel: string;
 };
 
@@ -37,12 +41,24 @@ function SubmitButton({ label }: { label: string }) {
   );
 }
 
-export function StudentForm({ action, student, submitLabel }: StudentFormProps) {
+export function StudentForm({
+  action,
+  student,
+  groups,
+  submitLabel,
+}: StudentFormProps) {
   const [state, formAction] = useActionState<ActionState, FormData>(action, {
     error: null,
   });
   const [enrollment, setEnrollment] = useState<EnrollmentStatus>(
     student?.enrollment_status ?? "active",
+  );
+  const [groupId, setGroupId] = useState<string>(
+    student
+      ? (student.schedule_group_id ?? NO_GROUP)
+      : (groups.find((group) => group.name === "Full time")?.id ??
+          groups[0]?.id ??
+          NO_GROUP),
   );
 
   useEffect(() => {
@@ -126,6 +142,34 @@ export function StudentForm({ action, student, submitLabel }: StudentFormProps) 
             placeholder="Optional GCVS ID"
             defaultValue={student?.gcvs_reference ?? ""}
           />
+        </div>
+      </div>
+
+      <div className="grid gap-4 sm:grid-cols-2">
+        <div className="space-y-2">
+          <Label htmlFor="schedule_group_id">Schedule group</Label>
+          <input
+            type="hidden"
+            name="schedule_group_id"
+            value={groupId === NO_GROUP ? "" : groupId}
+          />
+          <Select value={groupId} onValueChange={setGroupId}>
+            <SelectTrigger id="schedule_group_id" className="h-10 w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {groups.map((group) => (
+                <SelectItem key={group.id} value={group.id}>
+                  {group.name}
+                </SelectItem>
+              ))}
+              <SelectItem value={NO_GROUP}>No group (school-wide schedule)</SelectItem>
+            </SelectContent>
+          </Select>
+          <p className="text-xs leading-5 text-muted-foreground">
+            Sets which days the student attends and when they count as tardy or
+            missing. Manage groups in Settings.
+          </p>
         </div>
       </div>
 

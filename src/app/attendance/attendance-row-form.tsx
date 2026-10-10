@@ -1,7 +1,7 @@
 "use client";
 
 import { useActionState } from "react";
-import { Save } from "lucide-react";
+import { Clock, Save } from "lucide-react";
 
 import {
   markAttendance,
@@ -23,36 +23,71 @@ import {
 type AttendanceRowFormProps = {
   studentId: string;
   date: string;
+  isToday: boolean;
   status: AttendanceStatus | null;
+  arrivedAt: string | null;
   note: string | null;
 };
 
 const initialState: AttendanceActionState = { error: null };
 
-const statuses: AttendanceStatus[] = ["present", "tardy", "absent", "excused"];
+const choices: { value: string; label: string }[] = [
+  { value: "auto", label: "From arrival time" },
+  { value: "present", label: "Present" },
+  { value: "tardy", label: "Tardy" },
+  { value: "absent", label: "Absent" },
+  { value: "excused", label: "Excused" },
+];
 
 export function AttendanceRowForm({
   studentId,
   date,
+  isToday,
   status,
+  arrivedAt,
   note,
 }: AttendanceRowFormProps) {
   const [state, action, pending] = useActionState(markAttendance, initialState);
-  const currentStatus = status ?? "present";
+  // Arrival-based records stay on "From arrival time" so editing the time re-decides tardy.
+  const defaultChoice =
+    status === null || ((status === "present" || status === "tardy") && arrivedAt)
+      ? "auto"
+      : status;
+  const showArrivedNow = isToday && status !== "present" && status !== "tardy";
 
   return (
     <form action={action} className="space-y-2">
       <input type="hidden" name="student_id" value={studentId} />
       <input type="hidden" name="date" value={date} />
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-        <Select name="status" defaultValue={currentStatus}>
-          <SelectTrigger className="h-9 w-full min-w-32 sm:w-36">
+      <div className="flex flex-col gap-2 lg:flex-row lg:flex-wrap lg:items-center">
+        {showArrivedNow ? (
+          <Button
+            type="submit"
+            name="intent"
+            value="arrived_now"
+            size="sm"
+            disabled={pending}
+            className="h-9"
+          >
+            <Clock className="size-4" aria-hidden="true" />
+            Arrived now
+          </Button>
+        ) : null}
+        <Input
+          name="arrived_at"
+          type="time"
+          aria-label="Arrival time"
+          defaultValue={arrivedAt?.slice(0, 5) ?? ""}
+          className="h-9 w-full lg:w-32"
+        />
+        <Select name="status" defaultValue={defaultChoice}>
+          <SelectTrigger className="h-9 w-full min-w-40 lg:w-44" aria-label="Status">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            {statuses.map((item) => (
-              <SelectItem key={item} value={item}>
-                <span className="capitalize">{item}</span>
+            {choices.map((item) => (
+              <SelectItem key={item.value} value={item.value}>
+                {item.label}
               </SelectItem>
             ))}
           </SelectContent>
@@ -61,9 +96,17 @@ export function AttendanceRowForm({
           name="note"
           defaultValue={note ?? ""}
           placeholder="Note"
-          className="h-9 min-w-0 sm:w-48"
+          className="h-9 min-w-0 lg:w-40"
         />
-        <Button type="submit" size="sm" disabled={pending} className="h-9">
+        <Button
+          type="submit"
+          name="intent"
+          value="save"
+          size="sm"
+          variant="outline"
+          disabled={pending}
+          className="h-9"
+        >
           <Save className="size-4" aria-hidden="true" />
           {pending ? "Saving" : "Save"}
         </Button>

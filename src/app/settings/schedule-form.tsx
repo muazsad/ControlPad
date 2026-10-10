@@ -145,7 +145,9 @@ export function ScheduleForm({ weeklyPattern, breaks, specialDays }: Props) {
         <CardHeader>
           <CardTitle>Weekly school days</CardTitle>
           <CardDescription>
-            Default pattern: Monday, Tuesday, Wednesday, Thursday, and Saturday.
+            School-wide open days. Used for students without a schedule group
+            and for the Quran and digest checks. Grouped students follow their
+            group&apos;s days.
           </CardDescription>
         </CardHeader>
         <CardContent>
