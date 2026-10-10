@@ -16,13 +16,20 @@ ControlPad is an admin/visibility/alerts web app for Salaam Institute (an Islami
 
 ## Repo conventions
 
-- `app/` — routes (App Router). Group by role where it helps (`app/(admin)`, `app/(moderator)`, `app/(parent)`).
-- `lib/supabase/` — separate **server** and **browser** clients. Never import the server/service-role client into a client component.
-- `lib/sms/` — the single Twilio send module. All SMS go through here and get logged to `notifications`.
-- `lib/alerts/` — the threshold-checking logic (grade, absence, tardy, quran, payment).
-- `app/api/cron/` — protected cron endpoints.
+All app code lives under `src/` (import alias `@/` → `src/`). Full map in `docs/PROJECT_PLAN.md` §6.
+
+- `src/app/` — routes (App Router), **one folder per nav tab** (`students`, `guardians`, `grades`, `top-performers`, `attendance`, `quran`, `tuition`, `staff`, `settings`), plus `login`, `auth/callback`, `setup-profile`. There are **no role route groups** — each page/action checks the role server-side with `requireRole()` from `src/lib/auth/current-profile.ts`.
+- Mutations are **server actions** in each route folder's `actions.ts`.
+- `src/app/page.tsx` — admin/moderator dashboard, or the parent "My children" view.
+- `src/lib/supabase/` — separate `server.ts` and `client.ts` (browser) clients, plus `middleware.ts`. Never import the server/service-role client into a client component.
+- `src/lib/sms/send-sms.ts` — the single Twilio send module. All SMS go through here and get logged to `notifications`.
+- `src/lib/alerts/` — threshold-checking logic (grades, attendance, quran, payment, payment-overdue, admin-digest, admin-dashboard-severity).
+- `src/lib/people/` — performance metrics, student metrics, escalation, Quran progress.
+- `src/lib/schedule/` — school calendar logic (`calendar.ts`, pure) and DB loading (`calendar-data.ts`). Time-based alerts must respect the calendar.
+- `src/app/api/cron/` — protected cron endpoints; use `requireCronSecret()` from `_utils.ts`. Schedules are in `vercel.json` (UTC).
 - `supabase/migrations/` — all schema changes as migration files.
-- `docs/` — the planning docs (this set).
+- Tests sit next to the code as `*.test.ts` (Node test runner + `tsx`); run with `npm test`.
+- `docs/` — planning docs; `docs/superpowers/` holds per-feature specs and implementation plans.
 
 ## Security rules (non-negotiable)
 
@@ -34,7 +41,8 @@ ControlPad is an admin/visibility/alerts web app for Salaam Institute (an Islami
 
 ## Behavioral rules
 
-- **Build one phase at a time** following `docs/BUILD_PROMPTS.md`. After each phase, leave the app in a working, deployable state.
+- The original 8 build phases are complete; `docs/BUILD_PROMPTS.md` is historical. Check **§10 "Known gaps & next up"** in `docs/PROJECT_PLAN.md` before starting new work.
+- Work in small, focused changes on a branch off `main`. After each change, `npm test` and `npm run build` must pass and the app must stay deployable.
 - **Never hardcode thresholds.** Read them from the `settings` table (grade floor, tardy window, etc.).
 - **Every alert** is checked against `settings`, sent via `lib/sms/`, and written to `notifications`. Before sending, check `notifications` to avoid duplicate alerts for the same student+trigger in the relevant window.
 - Use Supabase **migrations** for schema changes — never tell the user to paste SQL into the dashboard for permanent changes.
@@ -59,8 +67,8 @@ Ask a focused question rather than guessing on schema, role permissions, or mone
 ## Design System (established in Phase 1 — follow this in every phase)
 
 The UI uses **shadcn/ui + Tailwind**. Do not introduce any other component library.
-All reusable components live in `components/ui/` (shadcn primitives) and
-`components/app/` (project-specific, e.g. StatusBadge, SummaryCard, DataTable).
+All reusable components live in `src/components/ui/` (shadcn primitives) and
+`src/components/controlpad/` (project-specific: AppShell, StatusBadge, SummaryCard, DataTable, EmptyState, PageHeader, etc.).
 
 ### Brand colors (CSS variables in globals.css)
 - Primary navy:   `--color-primary`   (~#1E2A5E)  — sidebar, nav, primary buttons, headings
@@ -83,8 +91,9 @@ Always use these for data status, never improvise new colors:
 - Empty states: friendly message + icon, never a blank space
 
 ### App shell
-- Admin/Moderator: left sidebar (collapsible on mobile) — Dashboard, Students, Grades,
-  Top Performers, Attendance, Quran, Tuition, Settings. Settings and Tuition visible to Admin only.
+- Admin/Moderator: left sidebar (collapsible on mobile) — Dashboard, Students, Guardians, Grades,
+  Top Performers, Attendance, Quran, then Tuition, Staff, Settings (these three Admin only).
+  Nav is defined in `src/components/controlpad/app-shell.tsx`.
 - Parent: simplified top-bar layout, larger text, minimal options. No sidebar.
 - Top bar: wordmark left, user name + role + avatar dropdown (sign out) right.
 
