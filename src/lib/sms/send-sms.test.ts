@@ -1,7 +1,15 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { getSmsConfig, maskPhone, sendSms, type SmsDatabase } from "./send-sms";
+import {
+  decideDedupe,
+  getSmsConfig,
+  maskPhone,
+  MAX_FAILED_SEND_ATTEMPTS,
+  sendSms,
+  type RecentNotification,
+  type SmsDatabase,
+} from "./send-sms";
 
 type NotificationRow = {
   recipient_phone: string;
@@ -22,25 +30,29 @@ class FakeSmsDatabase implements SmsDatabase {
     this.rows = rows;
   }
 
-  async findRecentNotification(input: {
+  async findRecentNotifications(input: {
     recipientPhone: string;
     studentId: string | null;
     triggerType: string;
     since: Date;
     dedupeKey?: string | null;
-    statuses: readonly string[];
-  }) {
-    return (
-      this.rows.find((row) =>
-        row.recipient_phone !== input.recipientPhone ||
-        !input.statuses.includes(row.status)
+  }): Promise<RecentNotification[]> {
+    return this.rows
+      .map((row, index) => ({ row, index }))
+      .filter(({ row }) =>
+        row.recipient_phone !== input.recipientPhone
           ? false
           : input.dedupeKey
             ? row.dedupe_key === input.dedupeKey
             : row.student_id === input.studentId &&
               row.trigger_type === input.triggerType,
-      ) ?? null
-    );
+      )
+      .reverse()
+      .map(({ row, index }) => ({
+        id: String(index + 1),
+        status: row.status as RecentNotification["status"],
+        delivery_mode: (row.delivery_mode ?? null) as RecentNotification["delivery_mode"],
+      }));
   }
 
   async insertNotification(row: NotificationRow) {
@@ -194,19 +206,20 @@ describe("sendSms", () => {
     triggerType: "low_grade" as const,
     body: "Low grade alert",
   };
-  const priorRow = (status: string): NotificationRow => ({
+  const priorRow = (status: string, deliveryMode = "live"): NotificationRow => ({
     recipient_phone: "+14135550101",
     recipient_type: "parent",
     student_id: "student-1",
     trigger_type: "low_grade",
     body: "Earlier alert",
     status,
+    delivery_mode: deliveryMode,
   });
   const okFetch = (async () =>
     new Response(JSON.stringify({ sid: "SM2" }), { status: 201 })) as unknown as typeof fetch;
 
   it("does not let an earlier dry run block a real send", async () => {
-    const database = new FakeSmsDatabase([priorRow("dry_run")]);
+    const database = new FakeSmsDatabase([priorRow("dry_run", "off")]);
     const result = await sendSms(lowGradeAlert, { database, env: twilioEnv, fetch: okFetch });
     assert.equal(result.status, "sent");
     assert.equal(database.rows.length, 2);
@@ -233,10 +246,31 @@ describe("sendSms", () => {
   });
 
   it("dedupes dry runs against dry runs while texting is off", async () => {
-    const database = new FakeSmsDatabase([priorRow("dry_run")]);
+    const database = new FakeSmsDatabase([priorRow("dry_run", "off")]);
     const result = await sendSms(lowGradeAlert, { database, env: {} });
     assert.equal(result.status, "duplicate");
     assert.equal(database.rows.length, 1);
+  });
+
+  it("does not let a test-mode text block the live alert", async () => {
+    const database = new FakeSmsDatabase([priorRow("sent", "test")]);
+    const result = await sendSms(lowGradeAlert, { database, env: twilioEnv, fetch: okFetch });
+    assert.equal(result.status, "sent");
+  });
+
+  it("stops retrying after the max number of failed sends", async () => {
+    const database = new FakeSmsDatabase(
+      Array.from({ length: MAX_FAILED_SEND_ATTEMPTS }, () => priorRow("failed")),
+    );
+    const result = await sendSms(lowGradeAlert, {
+      database,
+      env: twilioEnv,
+      fetch: (async () => {
+        throw new Error("fetch should not run");
+      }) as typeof fetch,
+    });
+    assert.equal(result.status, "gave_up");
+    assert.equal(database.rows.length, MAX_FAILED_SEND_ATTEMPTS);
   });
 
   it("logs a new dry run after a failed send while texting is off", async () => {
@@ -274,5 +308,32 @@ describe("getSmsConfig", () => {
 
   it("masks phone numbers", () => {
     assert.equal(maskPhone("+14135550101"), "•••0101");
+  });
+});
+
+describe("decideDedupe", () => {
+  const row = (
+    status: RecentNotification["status"],
+    delivery_mode: RecentNotification["delivery_mode"],
+  ): RecentNotification => ({ id: "n", status, delivery_mode });
+
+  it("sends when there is nothing recent", () => {
+    assert.equal(decideDedupe([], "live").action, "send");
+  });
+
+  it("treats rows logged before delivery modes existed as same-mode", () => {
+    assert.equal(decideDedupe([row("sent", null)], "live").action, "duplicate");
+  });
+
+  it("lets a real live send block a dry run while texting is off", () => {
+    assert.equal(decideDedupe([row("sent", "live")], "off").action, "duplicate");
+  });
+
+  it("only counts same-mode failures toward the retry cap", () => {
+    const testFailures = Array.from({ length: MAX_FAILED_SEND_ATTEMPTS }, () =>
+      row("failed", "test"),
+    );
+    assert.equal(decideDedupe(testFailures, "live").action, "send");
+    assert.equal(decideDedupe(testFailures, "test").action, "gave_up");
   });
 });

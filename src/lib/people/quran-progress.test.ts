@@ -92,6 +92,6 @@ describe("summarizeQuranProgress", () => {
 
     assert.equal(result.pattern.status, "classified");
     assert.equal(result.pattern.pattern, "irregular");
-    assert.ok(result.pattern.gapStats.coefficientOfVariation > 0.5);
+    assert.ok((result.pattern.gapStats.coefficientOfVariation ?? 0) > 0.5);
   });
 });

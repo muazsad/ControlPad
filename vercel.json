@@ -2,10 +2,6 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "crons": [
     {
-      "path": "/api/cron/quran-slip",
-      "schedule": "0 15 * * *"
-    },
-    {
       "path": "/api/cron/payment-overdue",
       "schedule": "30 15 * * *"
     }

@@ -1,13 +1,25 @@
 import { createServiceClient } from "@/lib/supabase/server";
 import { sendSms, type SendSmsInput, type SmsResult } from "@/lib/sms/send-sms";
 import { getServiceSchoolCalendar } from "@/lib/schedule/calendar-data";
+import { type SchoolCalendarConfig } from "@/lib/schedule/calendar";
+import { getServiceScheduleGroups } from "@/lib/schedule/schedule-groups-data";
 import {
-  isSchoolDay,
-  schoolDayWindowEnding,
-  type SchoolCalendarConfig,
-} from "@/lib/schedule/calendar";
+  expectedDatesEnding,
+  scheduleForDate,
+  type DefaultSchedule,
+  type ScheduleGroup,
+} from "@/lib/schedule/student-schedule";
 
 const SCHOOL_TIME_ZONE = "America/New_York";
+
+/** Tardies are counted over each student's last N expected school days. */
+export const TARDY_WINDOW_SCHOOL_DAYS = 7;
+
+/**
+ * How far back (calendar days) to look for those N days. Bounds the query for
+ * students in groups that meet rarely (e.g. once a week → ~7 weeks).
+ */
+export const TARDY_LOOKBACK_MAX_DAYS = 63;
 
 type Recipient = {
   full_name: string;
@@ -30,6 +42,12 @@ export type TardyThresholdStudent = AttendanceAlertStudent & {
   tardyCount: number;
 };
 
+/** A student with at least one tardy in the lookback range. */
+export type TardyCandidate = AttendanceAlertStudent & {
+  groupId: string | null;
+  tardyDates: string[];
+};
+
 export type AttendanceSettings = {
   schoolStart: string;
   tardyWindowHours: number;
@@ -39,12 +57,13 @@ export type AttendanceSettings = {
 export type AttendanceAlertDatabase = {
   getAttendanceSettings(): Promise<AttendanceSettings>;
   getSchoolCalendar(): Promise<SchoolCalendarConfig>;
+  getScheduleGroups(): Promise<ScheduleGroup[]>;
   getAdminRecipients(): Promise<Recipient[]>;
-  getStudentsAtTardyThreshold(input: {
+  /** Active students with a tardy between startDate and endDate (inclusive). */
+  getTardyCandidates(input: {
+    startDate: string;
     endDate: string;
-    schoolDates: string[];
-    tardiesPerWeek: number;
-  }): Promise<TardyThresholdStudent[]>;
+  }): Promise<TardyCandidate[]>;
 };
 
 type AlertDeps = {
@@ -76,20 +95,18 @@ type GuardianLinkRow = {
     | null;
 };
 
+type TardyStudent = {
+  id: string;
+  first_name: string;
+  last_name: string;
+  schedule_group_id: string | null;
+  enrollment_status: string;
+};
+
 type TardyRow = {
   student_id: string;
-  students:
-    | {
-        id: string;
-        first_name: string;
-        last_name: string;
-      }
-    | {
-        id: string;
-        first_name: string;
-        last_name: string;
-      }[]
-    | null;
+  date: string;
+  students: TardyStudent | TardyStudent[] | null;
 };
 
 function firstRelated<T>(value: T | T[] | null): T | null {
@@ -122,6 +139,61 @@ function schoolDateParts(now: Date) {
 
 export function todayInSchoolTimeZone(now = new Date()) {
   return schoolDateParts(now).date;
+}
+
+function addDays(date: string, days: number): string {
+  const cursor = new Date(`${date.slice(0, 10)}T00:00:00.000Z`);
+  cursor.setUTCDate(cursor.getUTCDate() + days);
+  return cursor.toISOString().slice(0, 10);
+}
+
+/**
+ * Students at or over the tardy threshold on `date`. Each student's tardies are
+ * counted over *their own* last TARDY_WINDOW_SCHOOL_DAYS expected days (their
+ * schedule group's weekdays, or the school-wide pattern if ungrouped), so
+ * tardies on days only their group attends count. Only students expected on
+ * `date` are returned — the check runs on the days they attend.
+ */
+export function studentsAtTardyThreshold(input: {
+  date: string;
+  candidates: TardyCandidate[];
+  groups: ScheduleGroup[];
+  calendar: SchoolCalendarConfig;
+  defaults: DefaultSchedule;
+  tardiesPerWeek: number;
+}): TardyThresholdStudent[] {
+  const groupsById = new Map(input.groups.map((group) => [group.id, group]));
+  const result: TardyThresholdStudent[] = [];
+
+  for (const candidate of input.candidates) {
+    const group = candidate.groupId ? groupsById.get(candidate.groupId) ?? null : null;
+    if (!scheduleForDate(input.date, group, input.calendar, input.defaults)) continue;
+
+    const window = new Set(
+      expectedDatesEnding(
+        input.date,
+        TARDY_WINDOW_SCHOOL_DAYS,
+        group,
+        input.calendar,
+        input.defaults,
+        TARDY_LOOKBACK_MAX_DAYS,
+      ),
+    );
+    const tardyCount = new Set(
+      candidate.tardyDates.filter((date) => window.has(date)),
+    ).size;
+    if (tardyCount < input.tardiesPerWeek) continue;
+
+    result.push({
+      id: candidate.id,
+      first_name: candidate.first_name,
+      last_name: candidate.last_name,
+      guardians: candidate.guardians,
+      tardyCount,
+    });
+  }
+
+  return result;
 }
 
 async function guardianMapForStudents(studentIds: string[]) {
@@ -177,51 +249,38 @@ export function createSupabaseAttendanceAlertDatabase(): AttendanceAlertDatabase
       if (error) throw new Error(error.message);
       return (data ?? []) as Recipient[];
     },
-    async getStudentsAtTardyThreshold({ endDate, schoolDates, tardiesPerWeek }) {
-      if (schoolDates.length === 0) return [];
-
-      const startDate = schoolDates[0];
-
+    getScheduleGroups: getServiceScheduleGroups,
+    async getTardyCandidates({ startDate, endDate }) {
       const { data, error } = await supabase
         .from("attendance")
-        .select("student_id, students(id, first_name, last_name)")
+        .select(
+          "student_id, date, students(id, first_name, last_name, schedule_group_id, enrollment_status)",
+        )
         .eq("status", "tardy")
         .gte("date", startDate)
-        .lte("date", endDate)
-        .in("date", schoolDates);
+        .lte("date", endDate);
 
       if (error) throw new Error(error.message);
 
-      const rows = (data ?? []) as TardyRow[];
-      const counts = new Map<string, { count: number; row: TardyRow }>();
-      for (const row of rows) {
-        const current = counts.get(row.student_id);
-        counts.set(row.student_id, {
-          count: (current?.count ?? 0) + 1,
-          row: current?.row ?? row,
-        });
+      const byStudent = new Map<string, { student: TardyStudent; dates: string[] }>();
+      for (const row of (data ?? []) as TardyRow[]) {
+        const student = firstRelated(row.students);
+        if (!student || student.enrollment_status !== "active") continue;
+        const entry = byStudent.get(row.student_id) ?? { student, dates: [] };
+        entry.dates.push(String(row.date).slice(0, 10));
+        byStudent.set(row.student_id, entry);
       }
 
-      const thresholdRows = Array.from(counts.entries()).filter(
-        ([, value]) => value.count >= tardiesPerWeek,
-      );
-      const guardianMap = await guardianMapForStudents(
-        thresholdRows.map(([studentId]) => studentId),
-      );
+      const guardianMap = await guardianMapForStudents(Array.from(byStudent.keys()));
 
-      return thresholdRows
-        .map(([studentId, value]) => {
-          const student = firstRelated(value.row.students);
-          if (!student) return null;
-          return {
-            id: student.id,
-            first_name: student.first_name,
-            last_name: student.last_name,
-            guardians: guardianMap.get(studentId) ?? [],
-            tardyCount: value.count,
-          };
-        })
-        .filter((student): student is TardyThresholdStudent => Boolean(student));
+      return Array.from(byStudent.entries()).map(([studentId, { student, dates }]) => ({
+        id: student.id,
+        first_name: student.first_name,
+        last_name: student.last_name,
+        groupId: student.schedule_group_id,
+        guardians: guardianMap.get(studentId) ?? [],
+        tardyDates: dates,
+      }));
     },
   };
 }
@@ -232,24 +291,31 @@ export async function checkTardyThresholdAlerts(
 ): Promise<AlertResult> {
   const database = deps.database ?? createSupabaseAttendanceAlertDatabase();
   const send = deps.sendSms ?? sendSms;
-  const [settings, calendar] = await Promise.all([
+  const [settings, calendar, groups, candidates] = await Promise.all([
     database.getAttendanceSettings(),
     database.getSchoolCalendar(),
+    database.getScheduleGroups(),
+    database.getTardyCandidates({
+      startDate: addDays(input.date, -TARDY_LOOKBACK_MAX_DAYS),
+      endDate: input.date,
+    }),
   ]);
-  if (!isSchoolDay(input.date, calendar)) {
-    return { checked: false, students: 0, messages: 0 };
-  }
 
-  const schoolDates = schoolDayWindowEnding(input.date, 7, calendar);
-  const students = await database.getStudentsAtTardyThreshold({
-    endDate: input.date,
-    schoolDates,
+  const students = studentsAtTardyThreshold({
+    date: input.date,
+    candidates,
+    groups,
+    calendar,
+    defaults: {
+      schoolStart: settings.schoolStart.slice(0, 5),
+      tardyWindowHours: settings.tardyWindowHours,
+    },
     tardiesPerWeek: settings.tardiesPerWeek,
   });
   const messages: SendSmsInput[] = [];
 
   for (const student of students) {
-    const body = `${studentName(student)} has ${student.tardyCount} tardies in the last 7 days, meeting the ControlPad threshold of ${settings.tardiesPerWeek}. Please contact Salaam Institute if you have questions.`;
+    const body = `${studentName(student)} has ${student.tardyCount} tardies in their last ${TARDY_WINDOW_SCHOOL_DAYS} school days, meeting the ControlPad threshold of ${settings.tardiesPerWeek}. Please contact Salaam Institute if you have questions.`;
     for (const guardian of student.guardians) {
       messages.push({
         recipientPhone: guardian.phone,

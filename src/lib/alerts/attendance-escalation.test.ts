@@ -229,6 +229,7 @@ describe("runAttendanceTick", () => {
   it("sends one admin batch text, then parent texts after the delay, then the tardy check", async () => {
     const sent: SendSmsInput[] = [];
     const tardyDates: string[] = [];
+    const quranDates: string[] = [];
     const deps = {
       database: new FakeDb(),
       sendSms: async (input: SendSmsInput) => {
@@ -237,6 +238,10 @@ describe("runAttendanceTick", () => {
       },
       checkTardies: async (date: string) => {
         tardyDates.push(date);
+        return { messages: 0 };
+      },
+      checkQuran: async (date: string) => {
+        quranDates.push(date);
         return { messages: 0 };
       },
     };
@@ -255,6 +260,7 @@ describe("runAttendanceTick", () => {
     assert.match(sent[0].body, /a1 Test \(unmarked\), a2 Test \(absent\)/);
     assert.match(sent[0].body, /Parents will be texted at 11:00 AM/);
     assert.equal(early.tardyCheck.ran, false);
+    assert.equal(early.quranCheck.ran, false);
 
     sent.length = 0;
     // 11:00 EDT — admin batch re-sent (deduped by sendSms) + two parent texts
@@ -269,6 +275,9 @@ describe("runAttendanceTick", () => {
     assert.match(parents[1].body, /was marked absent today/);
     assert.equal(later.tardyCheck.ran, true);
     assert.deepEqual(tardyDates, [MONDAY]);
+    // 11:00 Eastern is QURAN_CHECK_TIME
+    assert.equal(later.quranCheck.ran, true);
+    assert.deepEqual(quranDates, [MONDAY]);
     assert.equal(later.digest.ran, false);
   });
 
@@ -283,6 +292,7 @@ describe("runAttendanceTick", () => {
       database: new DigestDb(),
       sendSms: async () => ({ status: "dry_run" as const, notification: {} }),
       checkTardies: async () => ({ messages: 0 }),
+      checkQuran: async () => ({ messages: 0 }),
       sendDigest: async (date: string) => {
         digestCalls.push(date);
         return { sent: true };
@@ -298,5 +308,25 @@ describe("runAttendanceTick", () => {
 
     assert.deepEqual(digestCalls, ["2026-12-14"]);
     assert.deepEqual(result.digest, { ran: true, sent: true, skippedReason: null });
+  });
+
+  it("runs at 11:00 Eastern in both summer and winter", async () => {
+    const calls: string[] = [];
+    const deps = {
+      database: new FakeDb(),
+      sendSms: async () => ({ status: "dry_run" as const, notification: {} }),
+      checkTardies: async () => ({ messages: 0 }),
+      checkQuran: async (date: string) => {
+        calls.push(date);
+        return { messages: 0 };
+      },
+      sendDigest: async () => ({ sent: false }),
+    };
+    // 11:05 EDT (UTC-4) and 11:05 EST (UTC-5)
+    await runAttendanceTick({ now: new Date("2026-10-12T15:05:00Z") }, deps);
+    await runAttendanceTick({ now: new Date("2026-12-14T16:05:00Z") }, deps);
+    // 10:05 EST — too early
+    await runAttendanceTick({ now: new Date("2026-12-15T15:05:00Z") }, deps);
+    assert.deepEqual(calls, ["2026-10-12", "2026-12-14"]);
   });
 });

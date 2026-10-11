@@ -42,47 +42,86 @@ export type SmsConfig = {
 export type NotificationStatus = "queued" | "sent" | "failed" | "dry_run";
 
 /**
- * Notification statuses that count as "already alerted" for dedupe.
- * - dry_run rows never reached anyone, so they must not block a real alert
- *   once texting is switched on.
- * - failed rows never reached anyone either, so the next run retries.
- * - queued rows count, so two overlapping runs can't double-send.
+ * After this many failed sends for the same alert (same recipient + student +
+ * trigger, or same dedupe key) within the dedupe window, stop retrying. Stops a
+ * number Twilio keeps rejecting from being retried on every 10-minute tick.
  */
-export const DEDUPE_STATUSES_WHEN_SENDING: readonly NotificationStatus[] = [
-  "queued",
-  "sent",
-];
+export const MAX_FAILED_SEND_ATTEMPTS = 3;
+
+/** Most recent matching rows read for a dedupe decision. */
+export const DEDUPE_LOOKBACK_ROW_LIMIT = 20;
+
+export type RecentNotification = {
+  id: string;
+  status: NotificationStatus;
+  /** null for rows logged before delivery modes existed. */
+  delivery_mode: SmsMode | null;
+};
+
+export type DedupeDecision =
+  | { action: "send" }
+  | { action: "duplicate"; notification: RecentNotification }
+  | { action: "gave_up"; failedAttempts: number };
 
 /**
- * While texting is off, earlier dry runs also count, so a 10-minute cron tick
- * doesn't log the same would-be alert over and over on /messages.
+ * Decides whether an alert should go out, given the recent notifications for
+ * the same recipient + student + trigger (or dedupe key) within the window.
+ *
+ * - A message that reached someone (sent) or is in flight (queued) blocks a
+ *   repeat — but only if it was sent in the current mode, so test-mode texts
+ *   don't block real alerts once texting goes live.
+ * - Dry runs never reached anyone, so they don't block a real send. While
+ *   texting is off they do block another dry run, so the 10-minute tick
+ *   doesn't flood /messages.
+ * - Failed sends don't block a retry until MAX_FAILED_SEND_ATTEMPTS is reached.
+ *
+ * Rows with no delivery_mode (logged before modes existed) count for any mode.
  */
-export const DEDUPE_STATUSES_WHEN_OFF: readonly NotificationStatus[] = [
-  ...DEDUPE_STATUSES_WHEN_SENDING,
-  "dry_run",
-];
+export function decideDedupe(
+  recent: readonly RecentNotification[],
+  mode: SmsMode,
+): DedupeDecision {
+  const sameMode = (row: RecentNotification) =>
+    row.delivery_mode === null || row.delivery_mode === mode;
 
-export function dedupeStatusesForMode(mode: SmsMode): readonly NotificationStatus[] {
-  return mode === "off" ? DEDUPE_STATUSES_WHEN_OFF : DEDUPE_STATUSES_WHEN_SENDING;
+  const blocking = recent.find((row) => {
+    if (row.status === "sent" || row.status === "queued") {
+      return mode === "off" || sameMode(row);
+    }
+    if (row.status === "dry_run") return mode === "off";
+    return false;
+  });
+  if (blocking) return { action: "duplicate", notification: blocking };
+
+  if (mode !== "off") {
+    const failedAttempts = recent.filter(
+      (row) => row.status === "failed" && sameMode(row),
+    ).length;
+    if (failedAttempts >= MAX_FAILED_SEND_ATTEMPTS) {
+      return { action: "gave_up", failedAttempts };
+    }
+  }
+
+  return { action: "send" };
 }
 
 export type SmsResult =
   | { status: "duplicate"; notification: unknown }
+  | { status: "gave_up"; notification: null; error: string }
   | { status: "queued"; notification: unknown }
   | { status: "dry_run"; notification: unknown }
   | { status: "sent"; notification: unknown }
   | { status: "failed"; notification: unknown; error: string };
 
 export type SmsDatabase = {
-  findRecentNotification(input: {
+  /** Matching notifications created since `since`, newest first. */
+  findRecentNotifications(input: {
     recipientPhone: string;
     studentId: string | null;
     triggerType: NotificationTrigger;
     since: Date;
     dedupeKey?: string | null;
-    /** Only rows with one of these statuses count as a duplicate. */
-    statuses: readonly NotificationStatus[];
-  }): Promise<unknown | null>;
+  }): Promise<RecentNotification[]>;
   insertNotification(row: {
     recipient_phone: string;
     recipient_type: RecipientType;
@@ -187,21 +226,20 @@ export function createSupabaseSmsDatabase(): SmsDatabase {
   const supabase = createServiceClient();
 
   return {
-    async findRecentNotification({
+    async findRecentNotifications({
       recipientPhone,
       studentId,
       triggerType,
       since,
       dedupeKey,
-      statuses,
     }) {
       let query = supabase
         .from("notifications")
-        .select("id, created_at")
+        .select("id, status, delivery_mode")
         .eq("recipient_phone", recipientPhone)
         .gte("created_at", since.toISOString())
-        .in("status", [...statuses])
-        .limit(1);
+        .order("created_at", { ascending: false })
+        .limit(DEDUPE_LOOKBACK_ROW_LIMIT);
 
       if (dedupeKey) {
         query = query.eq("dedupe_key", dedupeKey);
@@ -213,9 +251,9 @@ export function createSupabaseSmsDatabase(): SmsDatabase {
             : query.eq("student_id", studentId);
       }
 
-      const { data, error } = await query.maybeSingle();
+      const { data, error } = await query;
       if (error) throw new Error(error.message);
-      return data;
+      return (data ?? []) as RecentNotification[];
     },
     async insertNotification(row) {
       const { data, error } = await supabase
@@ -251,17 +289,24 @@ export async function sendSms(
   const since = new Date(now().getTime() - dedupeWindowHours * 60 * 60 * 1000);
   const config = getSmsConfig(env);
 
-  const duplicate = await database.findRecentNotification({
+  const recent = await database.findRecentNotifications({
     recipientPhone: input.recipientPhone,
     studentId: input.studentId,
     triggerType: input.triggerType,
     since,
     dedupeKey: input.dedupeKey ?? null,
-    statuses: dedupeStatusesForMode(config.mode),
   });
+  const decision = decideDedupe(recent, config.mode);
 
-  if (duplicate) {
-    return { status: "duplicate", notification: duplicate };
+  if (decision.action === "duplicate") {
+    return { status: "duplicate", notification: decision.notification };
+  }
+  if (decision.action === "gave_up") {
+    return {
+      status: "gave_up",
+      notification: null,
+      error: `Not retried: ${decision.failedAttempts} failed attempts in the dedupe window.`,
+    };
   }
 
   const twilioEnv = config.mode === "off" ? null : config.twilio;

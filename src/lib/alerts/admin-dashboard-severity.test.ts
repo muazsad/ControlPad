@@ -9,6 +9,7 @@ import type { AdminDailySummary } from "./admin-digest";
 
 const summary: AdminDailySummary = {
   date: "2026-07-01",
+  schoolDayType: "full",
   settings: {
     adminDigestTime: "15:00",
     gradeFloor: 70,

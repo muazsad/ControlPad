@@ -135,10 +135,9 @@ School calendar:
 
 | Route | Runs from | Schedule | Notes |
 |---|---|---|---|
-| `/api/cron/attendance-tick` | Supabase pg_cron | every 10 min, 10:00–23:50 UTC | Absence escalation + weekly tardy check (schedule groups), and the daily admin digest at `admin_digest_time` Eastern. Needs Vault secrets (SETUP §5). |
-| `/api/cron/quran-slip` | Vercel | daily 15:00 UTC (11am EDT / 10am EST) | Skips non-school days. |
+| `/api/cron/attendance-tick` | Supabase pg_cron | every 10 min, 10:00–23:50 UTC | Absence escalation + tardy check (per student's own schedule), the daily Quran check at 11:00 Eastern (`QURAN_CHECK_TIME`), and the daily admin digest at `admin_digest_time` Eastern. Needs Vault secrets (SETUP §5). |
 | `/api/cron/payment-overdue` | Vercel | daily 15:30 UTC | Only acts after `payment_due_day`. |
-| `/api/cron/tardy-threshold`, `/api/cron/admin-digest` | manual only | — | Run by attendance-tick now; kept for manual runs (`?force=1` on the digest). |
+| `/api/cron/tardy-threshold`, `/api/cron/quran-slip`, `/api/cron/admin-digest` | manual only | — | Run by attendance-tick now; kept for manual runs (`?force=1` on the digest). |
 
 All routes accept `?date=YYYY-MM-DD` for manual/backfill runs.
 
@@ -270,6 +269,11 @@ ControlPad holds **children's educational records and family phone numbers**:
 **Later:**
 - Stripe online tuition payments
 - Richer parent portal
+- **Parent-reported absences** — a parent texts in (e.g. "Amina sick today") and the student is marked excused before the absence alert goes out.
+- **Weekly parent summary** — one text per student each weekend covering grades, attendance and Quran progress (good news as well as warnings).
+- **Report cards** — a per-student, per-term PDF built from existing grades, attendance and Quran data.
+- **Staff accountability** — show which teachers haven't taken attendance or logged Quran today.
+- **Announcements** — one-off text to all parents or one schedule group (closures, Eid schedule).
 
 ---
 

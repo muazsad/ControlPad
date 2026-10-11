@@ -156,3 +156,26 @@ export function statusForArrival(
     ? "present"
     : "tardy";
 }
+
+/**
+ * The last `count` dates (oldest first, ending at and including `endDate`) on
+ * which this student was expected, per `scheduleForDate`. Looks back at most
+ * `maxLookbackDays` calendar days, so it may return fewer than `count` dates.
+ */
+export function expectedDatesEnding(
+  endDate: string,
+  count: number,
+  group: ScheduleGroup | null,
+  calendar: SchoolCalendarConfig,
+  defaults: DefaultSchedule,
+  maxLookbackDays: number,
+): string[] {
+  const dates: string[] = [];
+  const cursor = new Date(`${endDate.slice(0, 10)}T00:00:00.000Z`);
+  for (let i = 0; i <= maxLookbackDays && dates.length < count; i += 1) {
+    const date = cursor.toISOString().slice(0, 10);
+    if (scheduleForDate(date, group, calendar, defaults)) dates.unshift(date);
+    cursor.setUTCDate(cursor.getUTCDate() - 1);
+  }
+  return dates;
+}

@@ -2,6 +2,7 @@ import { createServiceClient } from "@/lib/supabase/server";
 import { sendSms, type SendSmsInput, type SmsResult } from "@/lib/sms/send-sms";
 import { sendAdminDigest } from "@/lib/alerts/admin-digest";
 import { checkTardyThresholdAlerts } from "@/lib/alerts/attendance";
+import { checkQuranSlipAlerts } from "@/lib/alerts/quran";
 import type { SchoolCalendarConfig } from "@/lib/schedule/calendar";
 import { getServiceSchoolCalendar } from "@/lib/schedule/calendar-data";
 import { getServiceScheduleGroups } from "@/lib/schedule/schedule-groups-data";
@@ -43,6 +44,14 @@ const ADMIN_DEDUPE_HOURS = 20;
  * after settings.admin_digest_time (sendSms dedupes it to once per day).
  */
 const DIGEST_TRIGGER_WINDOW_MINUTES = 60;
+
+/**
+ * Local (Eastern) time the daily Quran inactivity check runs from the tick.
+ * Running it here instead of a fixed-UTC Vercel cron keeps it at the same local
+ * time year-round. Repeated ticks inside the window are deduped by sendSms.
+ */
+export const QURAN_CHECK_TIME = "11:00";
+const QURAN_CHECK_WINDOW_MINUTES = 60;
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -347,6 +356,7 @@ export type AttendanceTickResult = {
   messages: number;
   sent: Record<string, number>;
   tardyCheck: { ran: boolean; messages: number };
+  quranCheck: { ran: boolean; messages: number };
   digest: { ran: boolean; sent: boolean; skippedReason: string | null };
 };
 
@@ -356,6 +366,7 @@ export async function runAttendanceTick(
     database?: EscalationDatabase;
     sendSms?: (input: SendSmsInput) => Promise<SmsResult>;
     checkTardies?: (date: string) => Promise<{ messages: number }>;
+    checkQuran?: (date: string) => Promise<{ messages: number }>;
     sendDigest?: (
       date: string,
       now: Date,
@@ -366,6 +377,7 @@ export async function runAttendanceTick(
   const send = deps.sendSms ?? sendSms;
   const checkTardies =
     deps.checkTardies ?? ((date: string) => checkTardyThresholdAlerts({ date }));
+  const checkQuran = deps.checkQuran ?? ((date: string) => checkQuranSlipAlerts(date));
   const sendDigest =
     deps.sendDigest ?? ((date: string, now: Date) => sendAdminDigest({ date, now }));
 
@@ -405,6 +417,17 @@ export async function runAttendanceTick(
     tardyCheck = { ran: true, messages: result.messages };
   }
 
+  // Daily Quran inactivity check at QURAN_CHECK_TIME (local), year-round.
+  let quranCheck = { ran: false, messages: 0 };
+  const quranMinutes = timeToMinutes(QURAN_CHECK_TIME);
+  if (
+    nowMinutes >= quranMinutes &&
+    nowMinutes < quranMinutes + QURAN_CHECK_WINDOW_MINUTES
+  ) {
+    const result = await checkQuran(date);
+    quranCheck = { ran: true, messages: result.messages };
+  }
+
   // Daily admin digest at settings.admin_digest_time (local), year-round.
   let digest: AttendanceTickResult["digest"] = {
     ran: false,
@@ -434,6 +457,7 @@ export async function runAttendanceTick(
     messages: messages.length,
     sent,
     tardyCheck,
+    quranCheck,
     digest,
   };
 }
