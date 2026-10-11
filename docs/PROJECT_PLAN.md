@@ -247,10 +247,18 @@ ControlPad holds **children's educational records and family phone numbers**:
 
 ## 10. Known gaps & next up
 
-**Before texting goes live (owner):**
-1. Run `supabase db push`, create the two Vault secrets, and set `CRON_SECRET` in Vercel (`docs/SETUP.md` §5–6).
-2. Create the real schedule groups (e.g. *Quran only*) and assign students.
-3. Buy the Twilio number + A2P 10DLC registration; run in `SMS_MODE=test` for a few days, then `live`.
+**Current status (Oct 10, 2026):**
+- Production: <https://control-pad.vercel.app> (Vercel Hobby, deploys from `main`). Schedule groups, arrival-based attendance, the Messages page and the 10-minute attendance tick are live.
+- Database: a **new Supabase project** (the original free project was lost after inactivity). All migrations applied via `supabase db push`; test accounts from `npm run seed`. Free Supabase projects pause after a week of no activity — the 10-minute tick keeps this one active.
+- Vercel env vars set: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `CRON_SECRET`. Supabase Vault secrets `controlpad_app_url` and `controlpad_cron_secret` are set; `/api/cron/attendance-tick` was verified end to end (all messages logged as `dry_run`).
+- **Texting is off** (no Twilio number yet). Everything is logged on `/messages`.
+
+**Still to do:**
+1. **Twilio**: buy a number and complete A2P 10DLC registration (or toll-free verification), then `SMS_MODE=test` → `live`. Needs the school's legal name + EIN, a live website with privacy policy and terms pages, a non-Gmail contact email, and a parent opt-in (consent) line on enrollment. Details in `docs/SETUP.md` §3.
+2. **Dedupe should ignore dry runs** (and failed sends): today a `dry_run` row blocks the real alert for the dedupe window (up to 7 days) once texting is switched on. Fix `findRecentNotification` in `lib/sms/send-sms.ts` before going live.
+3. **Delete seed/test students** and their fake guardian phones before going live.
+4. **Create the real *Quran only* group** (days, start time, tardy grace, absence-check time) and assign students (Settings → Schedule groups; Students → Edit).
+5. Rotate the Supabase service-role key (it was shared in chat) before real student data goes in; update `.env.local` and Vercel.
 
 **Open questions / known limits:**
 - Half days: grouped students keep their normal times. Confirm whether afternoon groups (e.g. Quran only) should be off on half days.
