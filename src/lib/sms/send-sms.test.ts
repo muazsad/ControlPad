@@ -28,10 +28,12 @@ class FakeSmsDatabase implements SmsDatabase {
     triggerType: string;
     since: Date;
     dedupeKey?: string | null;
+    statuses: readonly string[];
   }) {
     return (
       this.rows.find((row) =>
-        row.recipient_phone !== input.recipientPhone
+        row.recipient_phone !== input.recipientPhone ||
+        !input.statuses.includes(row.status)
           ? false
           : input.dedupeKey
             ? row.dedupe_key === input.dedupeKey
@@ -183,6 +185,64 @@ describe("sendSms", () => {
 
     assert.equal((await send("absence_review:2026-10-12:g1")).status, "duplicate");
     assert.equal((await send("absence_review:2026-10-12:g2")).status, "dry_run");
+  });
+
+  const lowGradeAlert = {
+    recipientPhone: "+14135550101",
+    recipientType: "parent" as const,
+    studentId: "student-1",
+    triggerType: "low_grade" as const,
+    body: "Low grade alert",
+  };
+  const priorRow = (status: string): NotificationRow => ({
+    recipient_phone: "+14135550101",
+    recipient_type: "parent",
+    student_id: "student-1",
+    trigger_type: "low_grade",
+    body: "Earlier alert",
+    status,
+  });
+  const okFetch = (async () =>
+    new Response(JSON.stringify({ sid: "SM2" }), { status: 201 })) as unknown as typeof fetch;
+
+  it("does not let an earlier dry run block a real send", async () => {
+    const database = new FakeSmsDatabase([priorRow("dry_run")]);
+    const result = await sendSms(lowGradeAlert, { database, env: twilioEnv, fetch: okFetch });
+    assert.equal(result.status, "sent");
+    assert.equal(database.rows.length, 2);
+  });
+
+  it("does not let an earlier failed send block a retry", async () => {
+    const database = new FakeSmsDatabase([priorRow("failed")]);
+    const result = await sendSms(lowGradeAlert, { database, env: twilioEnv, fetch: okFetch });
+    assert.equal(result.status, "sent");
+  });
+
+  it("still dedupes against sent and queued notifications", async () => {
+    for (const status of ["sent", "queued"]) {
+      const database = new FakeSmsDatabase([priorRow(status)]);
+      const result = await sendSms(lowGradeAlert, {
+        database,
+        env: twilioEnv,
+        fetch: (async () => {
+          throw new Error("fetch should not run");
+        }) as typeof fetch,
+      });
+      assert.equal(result.status, "duplicate", status);
+    }
+  });
+
+  it("dedupes dry runs against dry runs while texting is off", async () => {
+    const database = new FakeSmsDatabase([priorRow("dry_run")]);
+    const result = await sendSms(lowGradeAlert, { database, env: {} });
+    assert.equal(result.status, "duplicate");
+    assert.equal(database.rows.length, 1);
+  });
+
+  it("logs a new dry run after a failed send while texting is off", async () => {
+    const database = new FakeSmsDatabase([priorRow("failed")]);
+    const result = await sendSms(lowGradeAlert, { database, env: {} });
+    assert.equal(result.status, "dry_run");
   });
 });
 

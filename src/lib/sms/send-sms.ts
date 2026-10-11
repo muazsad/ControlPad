@@ -39,6 +39,33 @@ export type SmsConfig = {
   testNumber: string | null;
 };
 
+export type NotificationStatus = "queued" | "sent" | "failed" | "dry_run";
+
+/**
+ * Notification statuses that count as "already alerted" for dedupe.
+ * - dry_run rows never reached anyone, so they must not block a real alert
+ *   once texting is switched on.
+ * - failed rows never reached anyone either, so the next run retries.
+ * - queued rows count, so two overlapping runs can't double-send.
+ */
+export const DEDUPE_STATUSES_WHEN_SENDING: readonly NotificationStatus[] = [
+  "queued",
+  "sent",
+];
+
+/**
+ * While texting is off, earlier dry runs also count, so a 10-minute cron tick
+ * doesn't log the same would-be alert over and over on /messages.
+ */
+export const DEDUPE_STATUSES_WHEN_OFF: readonly NotificationStatus[] = [
+  ...DEDUPE_STATUSES_WHEN_SENDING,
+  "dry_run",
+];
+
+export function dedupeStatusesForMode(mode: SmsMode): readonly NotificationStatus[] {
+  return mode === "off" ? DEDUPE_STATUSES_WHEN_OFF : DEDUPE_STATUSES_WHEN_SENDING;
+}
+
 export type SmsResult =
   | { status: "duplicate"; notification: unknown }
   | { status: "queued"; notification: unknown }
@@ -53,6 +80,8 @@ export type SmsDatabase = {
     triggerType: NotificationTrigger;
     since: Date;
     dedupeKey?: string | null;
+    /** Only rows with one of these statuses count as a duplicate. */
+    statuses: readonly NotificationStatus[];
   }): Promise<unknown | null>;
   insertNotification(row: {
     recipient_phone: string;
@@ -60,7 +89,7 @@ export type SmsDatabase = {
     student_id: string | null;
     trigger_type: NotificationTrigger;
     body: string;
-    status: "queued" | "sent" | "failed" | "dry_run";
+    status: NotificationStatus;
     dedupe_key?: string | null;
     delivery_mode?: SmsMode;
     twilio_sid?: string | null;
@@ -164,12 +193,14 @@ export function createSupabaseSmsDatabase(): SmsDatabase {
       triggerType,
       since,
       dedupeKey,
+      statuses,
     }) {
       let query = supabase
         .from("notifications")
         .select("id, created_at")
         .eq("recipient_phone", recipientPhone)
         .gte("created_at", since.toISOString())
+        .in("status", [...statuses])
         .limit(1);
 
       if (dedupeKey) {
@@ -218,6 +249,7 @@ export async function sendSms(
   const fetchImpl = deps.fetch ?? fetch;
   const dedupeWindowHours = input.dedupeWindowHours ?? 24 * 7;
   const since = new Date(now().getTime() - dedupeWindowHours * 60 * 60 * 1000);
+  const config = getSmsConfig(env);
 
   const duplicate = await database.findRecentNotification({
     recipientPhone: input.recipientPhone,
@@ -225,13 +257,13 @@ export async function sendSms(
     triggerType: input.triggerType,
     since,
     dedupeKey: input.dedupeKey ?? null,
+    statuses: dedupeStatusesForMode(config.mode),
   });
 
   if (duplicate) {
     return { status: "duplicate", notification: duplicate };
   }
 
-  const config = getSmsConfig(env);
   const twilioEnv = config.mode === "off" ? null : config.twilio;
 
   const notification = await database.insertNotification({

@@ -255,7 +255,7 @@ ControlPad holds **children's educational records and family phone numbers**:
 
 **Still to do:**
 1. **Twilio**: buy a number and complete A2P 10DLC registration (or toll-free verification), then `SMS_MODE=test` → `live`. Needs the school's legal name + EIN, a live website with privacy policy and terms pages, a non-Gmail contact email, and a parent opt-in (consent) line on enrollment. Details in `docs/SETUP.md` §3.
-2. **Dedupe should ignore dry runs** (and failed sends): today a `dry_run` row blocks the real alert for the dedupe window (up to 7 days) once texting is switched on. Fix `findRecentNotification` in `lib/sms/send-sms.ts` before going live.
+2. ~~**Dedupe should ignore dry runs** (and failed sends)~~ — done Oct 10: when texting is on, only `queued`/`sent` rows count as duplicates, so dry runs and failed sends no longer block a real alert. While texting is off, dry runs still dedupe against each other so `/messages` isn't flooded. See `DEDUPE_STATUSES_*` in `lib/sms/send-sms.ts`.
 3. **Delete seed/test students** and their fake guardian phones before going live.
 4. **Create the real *Quran only* group** (days, start time, tardy grace, absence-check time) and assign students (Settings → Schedule groups; Students → Edit).
 5. Rotate the Supabase service-role key (it was shared in chat) before real student data goes in; update `.env.local` and Vercel.
