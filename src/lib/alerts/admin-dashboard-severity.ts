@@ -31,7 +31,8 @@ export function dailySummarySeverity(
     summary.lowGrades.length +
     summary.quranSlippage.length +
     summary.overduePayments.length;
-  const warningCount = summary.tardies.length + summary.droppingGrades.length;
+  const warningCount =
+    summary.tardies.length + summary.unmarked.length + summary.droppingGrades.length;
 
   if (dangerCount > 0) {
     return {

@@ -18,6 +18,7 @@ const summary: AdminDailySummary = {
   },
   absences: [],
   tardies: [],
+  unmarked: [],
   lowGrades: [],
   droppingGrades: [],
   quranSlippage: [],

@@ -7,7 +7,15 @@ import {
   dayType,
   isSchoolDay,
   type CalendarDayType,
+  type SchoolCalendarConfig,
 } from "@/lib/schedule/calendar";
+import { getServiceScheduleGroups } from "@/lib/schedule/schedule-groups-data";
+import {
+  scheduleForDate,
+  timeToMinutes,
+  type DefaultSchedule,
+  type ScheduleGroup,
+} from "@/lib/schedule/student-schedule";
 
 const SCHOOL_TIME_ZONE = "America/New_York";
 
@@ -29,6 +37,14 @@ export type AttendanceIssue = {
   studentId: string;
   studentName: string;
   status: "absent" | "tardy";
+};
+
+/** Expected today (per schedule group) but no attendance record yet. */
+export type UnmarkedIssue = {
+  studentId: string;
+  studentName: string;
+  /** "HH:MM" — they count as unmarked once this time has passed. */
+  tardyCutoffTime: string;
 };
 
 export type LowGradeIssue = {
@@ -67,6 +83,7 @@ export type AdminDailySummary = {
   settings: AdminDigestSettings;
   absences: AttendanceIssue[];
   tardies: AttendanceIssue[];
+  unmarked: UnmarkedIssue[];
   lowGrades: LowGradeIssue[];
   droppingGrades: DroppingGradeIssue[];
   quranSlippage: QuranSlipIssue[];
@@ -74,7 +91,8 @@ export type AdminDailySummary = {
 };
 
 export type AdminDigestDatabase = {
-  getSummary(date: string): Promise<AdminDailySummary>;
+  /** `now` limits "unmarked" to students whose tardy cutoff has passed. */
+  getSummary(date: string, now?: Date): Promise<AdminDailySummary>;
   getAdminRecipients(): Promise<AdminRecipient[]>;
 };
 
@@ -95,10 +113,12 @@ type StudentRow = {
   first_name: string;
   last_name: string;
   created_at?: string | null;
+  schedule_group_id?: string | null;
 };
 
 type AttendanceRow = {
-  status: "absent" | "tardy";
+  student_id: string;
+  status: "present" | "absent" | "tardy" | "excused";
   students: StudentRow | StudentRow[] | null;
 };
 
@@ -177,6 +197,43 @@ function hasDigestTimeArrived(input: {
   return current.minutes >= parseTimeToMinutes(input.adminDigestTime);
 }
 
+/**
+ * Students expected on `date` (per their schedule group, or the school-wide
+ * pattern) with no attendance record. When `nowMinutes` is given, only those
+ * whose tardy cutoff has passed are included, so the morning dashboard doesn't
+ * list everyone before they've had a chance to arrive.
+ */
+export function findUnmarkedStudents(input: {
+  date: string;
+  nowMinutes: number | null;
+  students: { id: string; name: string; groupId: string | null }[];
+  markedStudentIds: ReadonlySet<string>;
+  groups: ScheduleGroup[];
+  calendar: SchoolCalendarConfig;
+  defaults: DefaultSchedule;
+}): UnmarkedIssue[] {
+  const groupsById = new Map(input.groups.map((group) => [group.id, group]));
+  const result: UnmarkedIssue[] = [];
+  for (const student of input.students) {
+    if (input.markedStudentIds.has(student.id)) continue;
+    const group = student.groupId ? groupsById.get(student.groupId) ?? null : null;
+    const schedule = scheduleForDate(input.date, group, input.calendar, input.defaults);
+    if (!schedule) continue;
+    if (
+      input.nowMinutes !== null &&
+      input.nowMinutes <= timeToMinutes(schedule.tardyCutoffTime)
+    ) {
+      continue;
+    }
+    result.push({
+      studentId: student.id,
+      studentName: student.name,
+      tardyCutoffTime: schedule.tardyCutoffTime,
+    });
+  }
+  return result.sort((a, b) => a.studentName.localeCompare(b.studentName));
+}
+
 function periodMonthFor(date: string) {
   return `${date.slice(0, 7)}-01`;
 }
@@ -185,6 +242,7 @@ function issueCount(summary: AdminDailySummary) {
   return (
     summary.absences.length +
     summary.tardies.length +
+    summary.unmarked.length +
     summary.lowGrades.length +
     summary.droppingGrades.length +
     summary.quranSlippage.length +
@@ -249,6 +307,7 @@ function namesForDigest(summary: AdminDailySummary) {
   const names = [
     ...summary.absences.map((issue) => issue.studentName),
     ...summary.tardies.map((issue) => issue.studentName),
+    ...summary.unmarked.map((issue) => issue.studentName),
     ...summary.lowGrades.map((issue) => issue.studentName),
     ...summary.droppingGrades.map((issue) => issue.studentName),
     ...summary.quranSlippage.map((issue) => issue.studentName),
@@ -261,11 +320,11 @@ export function createSupabaseAdminDigestDatabase(): AdminDigestDatabase {
   const supabase = createServiceClient();
 
   return {
-    async getSummary(date) {
+    async getSummary(date, now) {
       const { data: settingsRow, error: settingsError } = await supabase
         .from("settings")
         .select(
-          "admin_digest_time, grade_floor, quran_inactivity_days, payment_due_day",
+          "admin_digest_time, grade_floor, quran_inactivity_days, payment_due_day, school_start, tardy_window_hours",
         )
         .eq("id", 1)
         .single();
@@ -278,7 +337,10 @@ export function createSupabaseAdminDigestDatabase(): AdminDigestDatabase {
         quranInactivityDays: Number(settingsRow.quran_inactivity_days),
         paymentDueDay: Number(settingsRow.payment_due_day),
       };
-      const calendar = await getServiceSchoolCalendar();
+      const [calendar, groups] = await Promise.all([
+        getServiceSchoolCalendar(),
+        getServiceScheduleGroups(),
+      ]);
       const schoolDayType = dayType(date, calendar);
       const schoolIsInSession = isSchoolDay(date, calendar);
 
@@ -289,13 +351,12 @@ export function createSupabaseAdminDigestDatabase(): AdminDigestDatabase {
         quranResult,
         paidPaymentsResult,
       ] = await Promise.all([
-        schoolIsInSession
-          ? supabase
-              .from("attendance")
-              .select("status, students(id, first_name, last_name)")
-              .eq("date", date)
-              .in("status", ["absent", "tardy"])
-          : Promise.resolve({ data: [], error: null }),
+        // Not gated on the school-wide calendar: grouped students may attend
+        // on days the rest of the school is off (e.g. a Quran-only Friday).
+        supabase
+          .from("attendance")
+          .select("student_id, status, students(id, first_name, last_name)")
+          .eq("date", date),
         supabase
           .from("grades")
           .select(
@@ -304,7 +365,7 @@ export function createSupabaseAdminDigestDatabase(): AdminDigestDatabase {
           .order("recorded_at", { ascending: false }),
         supabase
           .from("students")
-          .select("id, first_name, last_name, created_at")
+          .select("id, first_name, last_name, created_at, schedule_group_id")
           .eq("enrollment_status", "active"),
         supabase
           .from("quran_progress")
@@ -324,10 +385,13 @@ export function createSupabaseAdminDigestDatabase(): AdminDigestDatabase {
         throw new Error(paidPaymentsResult.error.message);
       }
 
-      const attendanceIssues = ((attendanceResult.data ?? []) as AttendanceRow[])
+      const attendanceRows = (attendanceResult.data ?? []) as AttendanceRow[];
+      const attendanceIssues = attendanceRows
         .map((row) => {
           const student = firstRelated(row.students);
-          if (!student) return null;
+          if (!student || (row.status !== "absent" && row.status !== "tardy")) {
+            return null;
+          }
           return {
             studentId: student.id,
             studentName: studentName(student),
@@ -342,6 +406,26 @@ export function createSupabaseAdminDigestDatabase(): AdminDigestDatabase {
       );
 
       const students = (studentsResult.data ?? []) as StudentRow[];
+
+      const clock = now ? datePartsInSchoolTimeZone(now) : null;
+      const unmarked = findUnmarkedStudents({
+        date,
+        // Today: only past each student's cutoff. Past dates: everyone unmarked.
+        nowMinutes: clock && clock.date === date ? clock.minutes : null,
+        students: students.map((student) => ({
+          id: student.id,
+          name: studentName(student),
+          groupId: student.schedule_group_id ?? null,
+        })),
+        markedStudentIds: new Set(attendanceRows.map((row) => row.student_id)),
+        groups,
+        calendar,
+        defaults: {
+          schoolStart: String(settingsRow.school_start).slice(0, 5),
+          tardyWindowHours: Number(settingsRow.tardy_window_hours),
+        },
+      });
+
       const latestQuranDate = new Map<string, string>();
       for (const row of (quranResult.data ?? []) as QuranRow[]) {
         if (!latestQuranDate.has(row.student_id)) {
@@ -409,6 +493,7 @@ export function createSupabaseAdminDigestDatabase(): AdminDigestDatabase {
         settings,
         absences: attendanceIssues.filter((issue) => issue.status === "absent"),
         tardies: attendanceIssues.filter((issue) => issue.status === "tardy"),
+        unmarked,
         lowGrades,
         droppingGrades,
         quranSlippage,
@@ -431,10 +516,10 @@ export function createSupabaseAdminDigestDatabase(): AdminDigestDatabase {
 
 export async function getAdminDailySummary(
   asOfDate: string,
-  deps: AdminDigestDeps = {},
+  deps: AdminDigestDeps & { now?: Date } = {},
 ) {
   const database = deps.database ?? createSupabaseAdminDigestDatabase();
-  return database.getSummary(asOfDate);
+  return database.getSummary(asOfDate, deps.now);
 }
 
 export function formatAdminDigestSms(summary: AdminDailySummary) {
@@ -446,6 +531,7 @@ export function formatAdminDigestSms(summary: AdminDailySummary) {
         : "";
   const counts =
     `Absences ${summary.absences.length}, Tardies ${summary.tardies.length}, ` +
+    (summary.unmarked.length > 0 ? `Not checked in ${summary.unmarked.length}, ` : "") +
     `Low grades ${summary.lowGrades.length}, Dropping ${summary.droppingGrades.length}, ` +
     `Quran ${summary.quranSlippage.length}, Payments ${summary.overduePayments.length}.`;
   const names = namesForDigest(summary);
@@ -463,7 +549,7 @@ export async function sendAdminDigest(
 ): Promise<AdminDigestSendResult> {
   const database = deps.database ?? createSupabaseAdminDigestDatabase();
   const send = deps.sendSms ?? sendSms;
-  const summary = await database.getSummary(input.date);
+  const summary = await database.getSummary(input.date, input.now ?? new Date());
 
   if (!input.force && summary.schoolDayType === "off") {
     return { sent: false, skippedReason: "no_school", recipients: 0, summary };

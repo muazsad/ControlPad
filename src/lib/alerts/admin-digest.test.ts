@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import {
+  findUnmarkedStudents,
   formatAdminDigestSms,
   sendAdminDigest,
   summarizeGradeIssues,
@@ -9,6 +10,7 @@ import {
   type AdminDailySummary,
 } from "./admin-digest";
 import type { SendSmsInput } from "@/lib/sms/send-sms";
+import { DEFAULT_WEEKLY_PATTERN } from "@/lib/schedule/calendar";
 
 const emptySummary: AdminDailySummary = {
   date: "2026-06-27",
@@ -21,6 +23,7 @@ const emptySummary: AdminDailySummary = {
   },
   absences: [],
   tardies: [],
+  unmarked: [],
   lowGrades: [],
   droppingGrades: [],
   quranSlippage: [],
@@ -265,5 +268,59 @@ describe("admin digest", () => {
     assert.equal(result.sent, false);
     assert.equal(result.skippedReason, "no_school");
     assert.equal(sent.length, 0);
+  });
+});
+
+describe("findUnmarkedStudents", () => {
+  const calendar = { weeklyPattern: DEFAULT_WEEKLY_PATTERN, breaks: [], specialDays: [] };
+  const defaults = { schoolStart: "08:00", tardyWindowHours: 2 };
+  const groups = [
+    {
+      id: "quran-only",
+      name: "Quran only",
+      days: [{ weekday: 5, startTime: "16:00", tardyGraceMinutes: 5, absenceCheckTime: "16:30" }],
+    },
+  ];
+  const students = [
+    { id: "a", name: "Amina", groupId: null },
+    { id: "b", name: "Bilal", groupId: null },
+    { id: "q", name: "Qasim", groupId: "quran-only" },
+  ];
+
+  it("lists expected students with no record once their cutoff has passed", () => {
+    // Monday 2026-10-12 at 08:30 — ungrouped cutoff is 08:00
+    const result = findUnmarkedStudents({
+      date: "2026-10-12",
+      nowMinutes: 8 * 60 + 30,
+      students,
+      markedStudentIds: new Set(["b"]),
+      groups,
+      calendar,
+      defaults,
+    });
+    assert.deepEqual(result.map((r) => r.studentId), ["a"]);
+  });
+
+  it("waits until each student's own cutoff", () => {
+    // Friday 2026-10-16 — only the Quran-only group meets (cutoff 16:05)
+    const before = findUnmarkedStudents({
+      date: "2026-10-16", nowMinutes: 16 * 60, students,
+      markedStudentIds: new Set(), groups, calendar, defaults,
+    });
+    const after = findUnmarkedStudents({
+      date: "2026-10-16", nowMinutes: 16 * 60 + 10, students,
+      markedStudentIds: new Set(), groups, calendar, defaults,
+    });
+    assert.equal(before.length, 0);
+    assert.deepEqual(after.map((r) => r.studentId), ["q"]);
+  });
+
+  it("mentions unmarked students in the digest text", () => {
+    const body = formatAdminDigestSms({
+      ...emptySummary,
+      unmarked: [{ studentId: "a", studentName: "Amina Noor", tardyCutoffTime: "08:00" }],
+    });
+    assert.match(body, /Not checked in 1/);
+    assert.match(body, /Amina Noor/);
   });
 });

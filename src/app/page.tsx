@@ -55,6 +55,7 @@ function totalIssues(summary: AdminDailySummary) {
   return (
     summary.absences.length +
     summary.tardies.length +
+    summary.unmarked.length +
     summary.lowGrades.length +
     summary.droppingGrades.length +
     summary.quranSlippage.length +
@@ -208,11 +209,13 @@ function AdminDashboard({
       title: "Absences today",
       value: summary.absences.length,
       description:
-        summary.schoolDayType === "off"
-          ? "No school today."
-          : summary.absences.length > 0
-            ? "Students marked absent today."
-            : "No students are marked absent.",
+        summary.unmarked.length > 0
+          ? `${summary.unmarked.length} expected student${summary.unmarked.length === 1 ? "" : "s"} not checked in yet.`
+          : summary.schoolDayType === "off"
+            ? "No school today."
+            : summary.absences.length > 0
+              ? "Students marked absent today."
+              : "No students are marked absent.",
       href: "/attendance",
       icon: CalendarX2,
       tone: dangerIssueTone(summary.absences.length),
@@ -319,10 +322,21 @@ function AdminDashboard({
           empty={
             summary.schoolDayType === "off"
               ? "No school today."
-              : "No absences or tardies today."
+              : "No absences, tardies, or unmarked students today."
           }
-          hasItems={summary.absences.length + summary.tardies.length > 0}
+          hasItems={
+            summary.absences.length + summary.tardies.length + summary.unmarked.length > 0
+          }
         >
+          {summary.unmarked.map((issue) => (
+            <div
+              key={`${issue.studentId}-unmarked`}
+              className="flex items-center justify-between gap-3 border-b py-2 last:border-0"
+            >
+              <span className="text-sm font-medium">{issue.studentName}</span>
+              <StatusBadge status="Not checked in" tone="warning" />
+            </div>
+          ))}
           {[...summary.absences, ...summary.tardies].map((issue) => (
             <div
               key={`${issue.studentId}-${issue.status}`}
@@ -650,7 +664,7 @@ export default async function HomePage() {
   } else if (profile.role === "admin") {
     const today = todayInSchoolTimeZone();
     [adminDailySummary, adminEscalations] = await Promise.all([
-      getAdminDailySummary(today),
+      getAdminDailySummary(today, { now: new Date() }),
       getEscalationStudents(today),
     ]);
   }
