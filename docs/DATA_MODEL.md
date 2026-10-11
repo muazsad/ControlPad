@@ -245,6 +245,22 @@ create table inbound_messages (
   created_at      timestamptz not null default now()
 );
 
+-- Announcements (Oct 2026): one-off texts to all parents or chosen groups.
+create table announcements (
+  id             uuid primary key default gen_random_uuid(),
+  message        text not null,          -- 1–450 chars
+  audience       text[],                 -- null = all parents; else group ids / 'ungrouped'
+  status         text not null default 'scheduled', -- scheduled|sending|sent|cancelled|failed
+  send_at        timestamptz not null,
+  created_by     uuid references auth.users(id),
+  created_at     timestamptz not null default now(),
+  sent_at        timestamptz,
+  recipients     int,
+  failed_count   int,
+  delivery_mode  text,
+  error          text
+);
+
 create type absence_report_status as enum ('pending','excused','unexcused','dismissed');
 
 create table absence_reports (
@@ -291,6 +307,7 @@ as $$ select role from public.profiles where id = auth.uid() $$;
 | notifications | full | read | read **own** |
 | inbound_messages | read (writes: server only) | none | none |
 | absence_reports | full | read | none |
+| announcements | full | none | none |
 
 **Parent "own children" check** (reusable predicate):
 

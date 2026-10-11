@@ -18,7 +18,7 @@ ControlPad is an admin/visibility/alerts web app for Salaam Institute (an Islami
 
 All app code lives under `src/` (import alias `@/` → `src/`). Full map in `docs/PROJECT_PLAN.md` §6.
 
-- `src/app/` — routes (App Router), **one folder per nav tab** (`students`, `guardians`, `grades`, `top-performers`, `attendance`, `quran`, `tuition`, `messages`, `staff`, `settings`), plus `login`, `auth/callback`, `setup-profile`. There are **no role route groups** — each page/action checks the role server-side with `requireRole()` from `src/lib/auth/current-profile.ts`.
+- `src/app/` — routes (App Router), **one folder per nav tab** (`students`, `guardians`, `grades`, `top-performers`, `attendance`, `quran`, `tuition`, `announcements`, `messages`, `staff`, `settings`), plus `login`, `auth/callback`, `setup-profile`. There are **no role route groups** — each page/action checks the role server-side with `requireRole()` from `src/lib/auth/current-profile.ts`.
 - Mutations are **server actions** in each route folder's `actions.ts`.
 - `src/app/page.tsx` — admin/moderator dashboard, or the parent "My children" view.
 - `src/lib/supabase/` — separate `server.ts` and `client.ts` (browser) clients, plus `middleware.ts`. Never import the server/service-role client into a client component.
@@ -94,7 +94,7 @@ Always use these for data status, never improvise new colors:
 
 ### App shell
 - Admin/Moderator: left sidebar (collapsible on mobile) — Dashboard, Students, Guardians, Grades,
-  Top Performers, Attendance, Quran, then Tuition, Messages, Staff, Settings (these four Admin only).
+  Top Performers, Attendance, Quran, then Tuition, Announcements, Messages, Staff, Settings (these five Admin only).
   Nav is defined in `src/components/controlpad/app-shell.tsx`.
 - Parent: simplified top-bar layout, larger text, minimal options. No sidebar.
 - Top bar: wordmark left, user name + role + avatar dropdown (sign out) right.

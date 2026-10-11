@@ -11,7 +11,8 @@ export type NotificationTrigger =
   | "manual_test"
   | "special_day"
   | "absence_report_reply"
-  | "parent_message";
+  | "parent_message"
+  | "announcement";
 
 export type RecipientType = "admin" | "parent";
 
