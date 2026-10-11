@@ -31,7 +31,8 @@ export async function updateSession(request: NextRequest) {
 
   const { pathname } = request.nextUrl;
 
-  const publicPaths = ["/login", "/auth/callback", "/api/cron"];
+  // /api/sms/inbound is Twilio's webhook; it checks X-Twilio-Signature itself.
+  const publicPaths = ["/login", "/auth/callback", "/api/cron", "/api/sms/inbound"];
   const isPublic = publicPaths.some((p) => pathname.startsWith(p));
 
   if (!user && !isPublic) {

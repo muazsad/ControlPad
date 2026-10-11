@@ -68,12 +68,17 @@ export type EscalationStudent = {
   groupId: string | null;
   status: AttendanceMark | null;
   guardians: { full_name: string; phone: string }[];
+  /**
+   * A parent texted in that the student is out (absence report pending review
+   * or marked unexcused). The admin text still lists them; parents aren't texted.
+   */
+  reportedAbsent?: boolean;
 };
 
 export type FlaggedStudent = {
   id: string;
   name: string;
-  state: "unmarked" | "absent";
+  state: "unmarked" | "absent" | "reported";
 };
 
 export type AdminBatch = {
@@ -175,7 +180,11 @@ export function planAttendanceEscalation(input: {
     const flagged: FlaggedStudent = {
       id: student.id,
       name: `${student.firstName} ${student.lastName}`.trim(),
-      state: student.status === "absent" ? "absent" : "unmarked",
+      state: student.reportedAbsent
+        ? "reported"
+        : student.status === "absent"
+          ? "absent"
+          : "unmarked",
     };
 
     // Separate batch when parent texts are paused, so the admin text says so.
@@ -197,7 +206,12 @@ export function planAttendanceEscalation(input: {
     batch.students.push(flagged);
     batches.set(key, batch);
 
-    if (schedule.parentAlerts && input.nowMinutes >= parentMinutes) {
+    // The parent already told us — no "not checked in" text for them.
+    if (
+      flagged.state !== "reported" &&
+      schedule.parentAlerts &&
+      input.nowMinutes >= parentMinutes
+    ) {
       parentAlerts.push({ ...flagged, guardians: student.guardians });
     }
   }
@@ -214,7 +228,12 @@ export function adminReviewMessage(batch: AdminBatch, date: string): string {
   const shown = batch.students.slice(0, ADMIN_MESSAGE_MAX_NAMES);
   const extra = batch.students.length - shown.length;
   const names =
-    shown.map((student) => `${student.name} (${student.state})`).join(", ") +
+    shown
+      .map(
+        (student) =>
+          `${student.name} (${student.state === "reported" ? "parent reported" : student.state})`,
+      )
+      .join(", ") +
     (extra > 0 ? `, and ${extra} more` : "");
   const count = batch.students.length;
   return (
@@ -273,6 +292,9 @@ export function escalationMessages(
 }
 
 // ── Database ─────────────────────────────────────────────────────────────────
+
+/** Absence-report statuses that mean "the parent told us the student is out". */
+const REPORTED_ABSENCE_STATUSES = ["pending", "unexcused"];
 
 export type EscalationDatabase = {
   getSettings(): Promise<EscalationSettings>;
@@ -337,11 +359,23 @@ export function createSupabaseEscalationDatabase(): EscalationDatabase {
         .eq("attendance.date", date);
       if (error) throw new Error(error.message);
 
+      // Parent-reported absences. Tolerate the table being missing (migration
+      // not applied yet) so the tick keeps working.
+      const { data: reportData, error: reportError } = await supabase
+        .from("absence_reports")
+        .select("student_id")
+        .eq("date", date)
+        .in("status", REPORTED_ABSENCE_STATUSES);
+      const reported = new Set(
+        reportError ? [] : (reportData ?? []).map((row) => row.student_id as string),
+      );
+
       return ((data ?? []) as StudentRow[]).map((row) => ({
         id: row.id,
         firstName: row.first_name,
         lastName: row.last_name,
         groupId: row.schedule_group_id,
+        reportedAbsent: reported.has(row.id),
         status:
           (row.attendance ?? []).find((record) => record.date === date)?.status ??
           null,

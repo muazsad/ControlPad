@@ -10,6 +10,9 @@ export type NotificationTrigger =
   | "absence_review"
   | "manual_test"
   | "special_day"
+  | "absence_report_reply"
+  | "parent_message"
+  | "announcement"
   | "pace_behind"
   | "missing_assignments";
 

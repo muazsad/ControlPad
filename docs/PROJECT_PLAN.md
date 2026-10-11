@@ -55,7 +55,7 @@ Guiding principle: **catch problems early and notify the right person automatica
 - **Alert (event-based):** when a grade is saved below `settings.grade_floor` → SMS (via `checkLowGradeAlert` in `lib/alerts/grades.ts`). Applies to single saves and to every grade inserted by the sweep.
 
 ### 3.3 Attendance & schedule groups
-- **Schedule groups** (e.g. *Full time*, *Quran only*): each student belongs to one. A group sets, per weekday, whether it attends, its **start time**, **tardy grace** (minutes), and **absence check** time. Students without a group use the school-wide weekly pattern + `settings.school_start`. Breaks and no-school days apply to everyone; grouped students keep their own times on half days. Managed in Settings (admin).
+- **Schedule groups** (e.g. *Full time*, *Quran only*): each student belongs to one. A group can have a **responsible teacher** (admin or moderator) who owns attendance and Quran logging for its students (see §3.7 staff checklist). A group sets, per weekday, whether it attends, its **start time**, **tardy grace** (minutes), and **absence check** time. Students without a group use the school-wide weekly pattern + `settings.school_start`. Breaks and no-school days apply to everyone; grouped students keep their own times on half days. Managed in Settings (admin).
 - Daily status per student: Present / Tardy / Absent / Excused, plus **arrival time** (one row per student per day).
 - Staff tap **Arrived now** (or enter a time); the app marks Present or Tardy from the student's group (after start + grace = tardy). The attendance page shows only students expected that day, with an expected / marked / unmarked count.
 - **Alerts (every 10 min, `/api/cron/attendance-tick`):**
@@ -80,13 +80,30 @@ Guiding principle: **catch problems early and notify the right person automatica
 - **Modes** (`SMS_MODE` env): `off` (log only, status `dry_run` — the default until Twilio keys exist), `test` (every text goes to `SMS_TEST_NUMBER`, prefixed with the intended recipient), `live`.
 - **Messages page (`/messages`, admin):** texting status, a "send me a test text" button, and the log of every message sent or that would have been sent.
 - Before sending, alerts check `notifications` to avoid duplicates (same recipient + student + trigger in the window, or an explicit `dedupe_key` for batched admin texts).
-- Trigger types: `low_grade`, `absence`, `absence_review`, `tardy_threshold`, `quran_slip`, `payment_overdue`, `admin_digest`, `manual_test`, `pace_behind`, `missing_assignments`.
+- Trigger types: `low_grade`, `absence`, `absence_review`, `tardy_threshold`, `quran_slip`, `payment_overdue`, `admin_digest`, `manual_test`, `special_day`, `absence_report_reply`, `parent_message`, `pace_behind`, `missing_assignments`.
 - **Not yet live:** a Twilio number needs to be bought and A2P 10DLC-registered (`docs/SETUP.md` §3).
+
+### 3.6a Parent-reported absences (incoming texts)
+- Parents text the school number (e.g. "Amina sick today"). Twilio posts to `/api/sms/inbound` (signature-checked); `handleInboundSms()` in `lib/absence-reports/inbound.ts` logs it to `inbound_messages` and decides (pure logic in `lib/absence-reports/parse.ts`):
+  - **Absence** (sick, absent, not coming, appointment, …) for a clear child (only child, named, or "both/all") → `absence_reports` row (one per student per date), status **pending**; parent gets an acknowledgement. Date: "tomorrow" / "today"; with neither, today — or tomorrow if sent after 6 PM Eastern.
+  - Absence but several children and none named → parent is asked which child; a reply within 2 hours completes it.
+  - Anything else (thanks, running late, questions, unknown numbers) → **forwarded to admin** by SMS.
+  - STOP/START/HELP → logged only (Twilio handles them).
+- **Admin approval:** `/attendance` lists pending reports with **Excuse** (attendance → excused), **Unexcused absence** (→ absent), **Dismiss**. Refused if the student was already marked present/tardy. Moderators see reports read-only. The dashboard shows how many are waiting.
+- **Alerts:** a student with a pending or unexcused report is listed in the admin absence-check text as "(parent reported)" but the parent gets **no** "not checked in" text.
+- `/messages` shows incoming texts and has an admin **Simulate text** box (same code path) for testing before Twilio is live. Replies follow `SMS_MODE` like every other text.
+- Spec: `docs/superpowers/specs/2026-10-11-parent-absence-reports-design.md`.
+
+### 3.6b Announcements (admin, `/announcements`)
+- One-off text to **all parents** or the parents of chosen **schedule groups** (plus "students without a group"); each family phone once. ≤ 450 characters, "Salaam Institute: " prefixed.
+- **Send now** (confirm) or **schedule** (Eastern, 8:00 AM–6:50 PM — inside the tick's hours); scheduled ones can be cancelled. The 10-minute tick route sends due ones (`sendDueAnnouncements` in `lib/announcements/send.ts`); a claim step prevents double sends.
+- Goes through `sendSms()` (trigger `announcement`, so `SMS_MODE` applies); history with results on the page. Spec: `docs/superpowers/specs/2026-10-11-announcements-design.md`.
 
 ### 3.7 Admin dashboard, daily digest & escalation
 - **Dashboard (`/`)**: summary cards and today's problems — absences/tardies, low or dropping grades, **behind pace**, **missing work**, Quran slippage, overdue payments — with severity ordering (`lib/alerts/admin-dashboard-severity.ts`).
 - **Critical students escalation**: scores each student over a rolling 30-day window across grades, attendance, Quran, payments, and (from each course's latest snapshot) behind-pace and missing-work → `ok` / `watch` / `critical`. Logic in `lib/people/escalation.ts` (all tunable constants at the top of that file).
 - **Daily digest**: SMS summary to admin(s) at `settings.admin_digest_time` (Eastern), triggered by the 10-minute attendance tick; skipped on no-school days. `/api/cron/admin-digest` supports `?force=1` and `?date=YYYY-MM-DD` for manual runs.
+- **Staff checklist** (dashboard): for today, each responsible teacher's attendance (`marked/expected`, missing once past the student's tardy cutoff) and Quran (`logged/expected`; expected every school day the student attends, unless absent/excused), with the missing students named. Ungrouped students and groups without a teacher show as "No teacher assigned". Unmarked students with a parent absence report are left to the admin. Logic in `lib/people/staff-accountability.ts`. No SMS.
 - Parents see a simplified "My children" dashboard instead.
 
 ### 3.8 Settings & school calendar (admin only, `/settings`)
@@ -141,7 +158,7 @@ School calendar:
 
 | Route | Runs from | Schedule | Notes |
 |---|---|---|---|
-| `/api/cron/attendance-tick` | Supabase pg_cron | every 10 min, 10:00–23:50 UTC | Absence escalation + tardy check (per student's own schedule), the daily Quran check at 11:00 Eastern (`QURAN_CHECK_TIME`), tomorrow's special-day parent text at 6:00 PM Eastern (`SPECIAL_DAY_NOTICE_TIME`), and the daily admin digest at `admin_digest_time` Eastern. Needs Vault secrets (SETUP §5). |
+| `/api/cron/attendance-tick` | Supabase pg_cron | every 10 min, 10:00–23:50 UTC | Absence escalation + tardy check (per student's own schedule), due scheduled announcements, the daily Quran check at 11:00 Eastern (`QURAN_CHECK_TIME`), tomorrow's special-day parent text at 6:00 PM Eastern (`SPECIAL_DAY_NOTICE_TIME`), and the daily admin digest at `admin_digest_time` Eastern. Needs Vault secrets (SETUP §5). |
 | `/api/cron/payment-overdue` | Vercel | daily 15:30 UTC | Only acts after `payment_due_day`. |
 | `/api/cron/tardy-threshold`, `/api/cron/quran-slip`, `/api/cron/admin-digest` | manual only | — | Run by attendance-tick now; kept for manual runs (`?force=1` on the digest). |
 
@@ -161,7 +178,10 @@ Full schema in `DATA_MODEL.md` and `supabase/migrations/`:
 | `20261010000000_schedule_groups.sql` | `schedule_groups`, `schedule_group_days`; `students.schedule_group_id`, `attendance.arrived_at`, `settings.parent_alert_delay_minutes`, `notifications.dedupe_key/delivery_mode`; new enum values; seeds **Full time** and assigns all students |
 | `20261010000100_attendance_tick_scheduler.sql` | Enables `pg_cron` + `pg_net`; schedules the 10-minute attendance tick (reads URL + secret from Vault) |
 | `20261011000000_special_day_options.sql` | More special-day types; `students_expected`, `send_attendance_alerts`, `applies_to`, `parent_message`, `notify_parents`, `parents_notified_at`; `special_day` notification trigger. Existing half days scoped to ungrouped students (unchanged behavior) |
-| `20261012000000_course_pace.sql` | `grades.percent_complete` / `missing_assignments`; `courses.start_date` / `end_date`; `settings.term_start` / `term_end` / `pace_gap_threshold` / `missing_assignments_threshold`; `pace_behind` and `missing_assignments` notification triggers. Additive; no RLS changes. **Must be applied (`supabase db push`) before this code is deployed.** |
+| `20261012000000_parent_absence_reports.sql` | `inbound_messages`, `absence_reports` (+ `absence_report_status` enum), RLS (admin; moderator read reports), triggers `absence_report_reply`, `parent_message` |
+| `20261012000100_course_pace.sql` | `grades.percent_complete` / `missing_assignments`; `courses.start_date` / `end_date`; `settings.term_start` / `term_end` / `pace_gap_threshold` / `missing_assignments_threshold`; `pace_behind` and `missing_assignments` notification triggers. Additive; no RLS changes. **Must be applied (`supabase db push`) before this code is deployed.** |
+| `20261013000000_schedule_group_teacher.sql` | `schedule_groups.teacher_id` (responsible teacher, → `profiles`) |
+| `20261014000000_announcements.sql` | `announcements` (admin-only RLS); trigger `announcement` |
 
 Core tables: `profiles` (role), `students`, `guardians`, `student_guardians`, `courses`, `grades`, `attendance`, `quran_progress`, `payments`, `settings` (single row), `notifications`, the three calendar tables, and `schedule_groups` + `schedule_group_days`.
 
@@ -174,7 +194,7 @@ Core tables: `profiles` (role), `students`, `guardians`, `student_guardians`, `c
 ```
 src/
   app/                    one folder per nav tab: students, guardians, grades, top-performers,
-                          attendance, quran, tuition, messages, staff, settings; plus login, auth/callback,
+                          attendance, quran, tuition, announcements, messages, staff, settings; plus login, auth/callback,
                           setup-profile. Mutations live in each folder's actions.ts (server actions).
   app/page.tsx            Dashboard (admin/moderator) or "My children" (parent)
   app/api/cron/           Protected cron routes + _utils.ts (requireCronSecret, cronDateParam)
@@ -183,11 +203,16 @@ src/
   lib/supabase/           server.ts, client.ts, middleware.ts
   lib/auth/               current-profile.ts (requireRole), admin-accounts.ts
   lib/sms/                send-sms.ts — the only Twilio path
+  lib/absence-reports/    parse.ts (pure: is it an absence, which child, which day), inbound.ts
+                          (handleInboundSms), review.ts, reports-data.ts
+  lib/announcements/      announcements.ts (pure, client-safe), send.ts (claim + send, due ones)
+  app/api/sms/inbound/    Twilio incoming-text webhook (signature-checked, public path)
   lib/alerts/             grades, attendance (tardy threshold), attendance-escalation (tick),
                           quran, payment, payment-overdue, admin-digest, admin-dashboard-severity
   lib/grades/             sweep (pure parse/plan/Eastern-window logic), sweep-data (latest snapshot per course),
                           pace (pure expected-pace logic), pace-data (term/thresholds/calendar loader)
-  lib/people/             performance, student-metrics, escalation, quran-progress, people
+  lib/people/             performance, student-metrics, escalation, quran-progress, people,
+                          staff-accountability (+ -data: dashboard staff checklist)
   lib/schedule/           calendar.ts + student-schedule.ts (pure logic), calendar-data.ts +
                           schedule-groups-data.ts (DB loading), schedule-group-validation.ts
   middleware.ts           Supabase session refresh / auth gate
@@ -254,6 +279,9 @@ ControlPad holds **children's educational records and family phone numbers**:
 - Oct 10: SMS dedupe fixed (dry runs/failed sends don't block real alerts; test-mode texts don't block live; failed sends retried max 3×)
 - Oct 10: tardy threshold counts each student's own last 7 expected days (group-aware); Quran check moved onto the 10-minute tick at 11:00 Eastern
 - Oct 10: dashboard + digest show students not checked in (past their tardy cutoff)
+- Oct 11: announcements — text all parents or chosen groups, now or scheduled (new admin tab)
+- Oct 11: staff checklist on the dashboard — responsible teacher per schedule group; today's attendance + Quran gaps per teacher
+- Oct 11: parent-reported absences by text — inbound Twilio webhook, absence reports with admin approval, forwarding of other parent texts, simulator on /messages (§3.6a)
 - Oct 10: special days — more types (schedule change, no GCVS, field trip, other), per-day options (students expected, new times, parent attendance texts on/off), group scope, and a parent text (auto 6pm the evening before and/or "Text parents now")
 - Oct 12: course pace — GCVS % complete and missing assignments on every snapshot, expected-pace calculation from the student's own school days, pace/missing alerts (parents + admin), dashboard and digest items, escalation signals, pace chart and bars (§3.2)
 - Oct 11: weekly grade sweep (`/grades/sweep`) — keyboard-driven bulk update of every active student's current grade per course, with unchanged-skip, draft recovery, and the normal low-grade alert (§3.2)
@@ -262,16 +290,19 @@ ControlPad holds **children's educational records and family phone numbers**:
 
 ## 10. Known gaps & next up
 
-**Current status (Oct 10, 2026, end of day):**
-- Production: <https://control-pad.vercel.app> (Vercel Hobby, deploys from `main`). Schedule groups, arrival-based attendance, the Messages page, the 10-minute attendance tick, and the new special days are live and verified.
-- Code: everything is merged to `main`; `npm test` (115 tests), type check and build pass. No open branches.
-- Database: a **new Supabase project** (the original free project was lost after inactivity). All migrations through `20261011000000_special_day_options.sql` applied via `supabase db push` (CLI is logged in and linked on the owner's Mac); test accounts from `npm run seed`. Free Supabase projects pause after a week of no activity — the 10-minute tick keeps this one active.
+**Current status (Oct 11, 2026):**
+- Production: <https://control-pad.vercel.app> (Vercel Hobby, deploys from `main`). Schedule groups, arrival-based attendance, the Messages page, the 10-minute attendance tick, and the new special days are live and verified. **The three Oct 11 features below are not on `main` yet, so they are not in production.**
+- Code: `main` is at the Oct 10 state. Three **stacked, unmerged** branches are pushed to GitHub, each containing the one before it: `feature/parent-absence-reports` → `feature/staff-accountability` → `feature/announcements` (tip). Merging the tip brings in all three. On the tip: `npm test` (181 tests), type check, lint and build pass (verified in a Linux copy with the Google Fonts fetch stubbed, since fonts can't be downloaded in the cloud sandbox). **Not yet checked on a Vercel preview or against the real database.**
+  - Parent-reported absences by text (§3.6a) · Staff checklist per group teacher (§3.7) · Announcements (§3.6b).
+  - Decided against, Oct 11: weekly parent summary and report cards (see **Later**).
+- Database: a **new Supabase project** (the original free project was lost after inactivity). All migrations through `20261014000000_announcements.sql` are applied via `supabase db push` (CLI is logged in and linked on the owner's Mac), including `20261012000000_parent_absence_reports.sql`, `20261012000100_course_pace.sql`, `20261013000000_schedule_group_teacher.sql` and `20261014000000_announcements.sql`; test accounts from `npm run seed`. Free Supabase projects pause after a week of no activity — the 10-minute tick keeps this one active.
 - Vercel env vars set: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `CRON_SECRET`. Supabase Vault secrets `controlpad_app_url` and `controlpad_cron_secret` are set; `/api/cron/attendance-tick` was verified end to end (all messages logged as `dry_run`).
 - **Texting is off** (no Twilio number yet). Everything is logged on `/messages`.
-- **No code work is blocking go-live.** What's left is owner setup (below). Feature ideas are under **Later**.
+- **No code work is blocking go-live.** What's left is review/merge of the three branches and owner setup (below). Remaining ideas are under **Later**.
 
 **Still to do:**
-1. **Twilio**: buy a number and complete A2P 10DLC registration (or toll-free verification), then `SMS_MODE=test` → `live`. Needs the school's legal name + EIN, a live website with privacy policy and terms pages, a non-Gmail contact email, and a parent opt-in (consent) line on enrollment. Details in `docs/SETUP.md` §3.
+0. **Review the Vercel preview, merge the tip branch `feature/announcements`** (it contains the other two), (the three feature migrations are already applied, so no `db push` is needed). Then assign a teacher to each group (Settings → Schedule groups). Suggested preview check: Messages → Simulate text ("sick today" from a test guardian's number) → report appears on Attendance → Excuse/Unexcused/Dismiss; Announcements → schedule one for a test group and cancel it.
+1. **Twilio**: buy a number and complete A2P 10DLC registration (or toll-free verification), then `SMS_MODE=test` → `live`. Needs the school's legal name + EIN, a live website with privacy policy and terms pages, a non-Gmail contact email, and a parent opt-in (consent) line on enrollment. Details in `docs/SETUP.md` §3. Also point the number's incoming-message webhook at `/api/sms/inbound` (SETUP §3 step 6).
 2. ~~**Apply the special-days migration**~~ — done Oct 10 (`20261011000000_special_day_options.sql` applied; special days verified in production).
 3. ~~**Dedupe should ignore dry runs** (and failed sends)~~ — done Oct 10. See `decideDedupe()` in `lib/sms/send-sms.ts`: only `queued`/`sent` rows *from the same SMS mode* block a repeat (test-mode texts don't block live ones); dry runs only block other dry runs while texting is off; failed sends are retried up to `MAX_FAILED_SEND_ATTEMPTS` (3) per dedupe window.
 4. **Delete seed/test students** and their fake guardian phones before going live.
@@ -287,11 +318,8 @@ ControlPad holds **children's educational records and family phone numbers**:
 **Later:**
 - Stripe online tuition payments
 - Richer parent portal
-- **Parent-reported absences** — a parent texts in (e.g. "Amina sick today") and the student is marked excused before the absence alert goes out.
-- **Weekly parent summary** — one text per student each weekend covering grades, attendance and Quran progress (good news as well as warnings).
-- **Report cards** — a per-student, per-term PDF built from existing grades, attendance and Quran data.
-- **Staff accountability** — show which teachers haven't taken attendance or logged Quran today.
-- **Announcements** — one-off text to all parents or one schedule group (closures, Eid schedule).
+- ~~Weekly parent summary~~ — skipped (owner decision, Oct 11).
+- ~~Report cards~~ — skipped (owner decision, Oct 11): only sent every few months, not worth automating.
 
 ---
 

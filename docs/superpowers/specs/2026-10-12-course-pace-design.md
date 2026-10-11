@@ -11,7 +11,7 @@ student *should* be by today.
 Stacked on `feat/grade-sweep` (PR #2) because it extends the sweep grid and
 `sweep.ts`; retarget to `main` once that merges.
 
-## Migration (`20261012000000_course_pace.sql`, additive, NOT applied by Claude)
+## Migration (`20261012000100_course_pace.sql`, additive, NOT applied by Claude)
 
 - `grades`: `percent_complete numeric(5,2)` (0–100), `missing_assignments integer` (>= 0), both NULL.
 - `courses`: `start_date`, `end_date` (per-course override; end >= start).

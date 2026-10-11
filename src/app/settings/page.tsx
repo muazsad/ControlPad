@@ -13,6 +13,10 @@ import {
 } from "@/lib/schedule/calendar";
 import { specialDayRecipients } from "@/lib/alerts/special-day";
 import { loadSpecialDayRows, specialDayFromRow } from "@/lib/schedule/calendar-data";
+import {
+  getGroupTeachers,
+  getStaffMembers,
+} from "@/lib/people/staff-accountability-data";
 import { getScheduleGroups } from "@/lib/schedule/schedule-groups-data";
 import { createClient } from "@/lib/supabase/server";
 
@@ -65,6 +69,8 @@ export default async function SettingsPage() {
     { data: specialDaysData },
     scheduleGroups,
     { data: activeStudents },
+    staff,
+    groupTeachers,
   ] = await Promise.all([
     supabase
       .from("school_weekly_patterns")
@@ -81,6 +87,8 @@ export default async function SettingsPage() {
       .from("students")
       .select("schedule_group_id, student_guardians(guardians(phone))")
       .eq("enrollment_status", "active"),
+    getStaffMembers(supabase),
+    getGroupTeachers(supabase),
   ]);
 
   const studentCounts: Record<string, number> = {};
@@ -144,6 +152,8 @@ export default async function SettingsPage() {
               groups={scheduleGroups}
               studentCounts={studentCounts}
               ungroupedCount={ungroupedCount}
+              staff={staff}
+              groupTeachers={Object.fromEntries(groupTeachers)}
             />
             <ScheduleForm
               weeklyPattern={weeklyPattern}

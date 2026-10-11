@@ -227,8 +227,59 @@ create table schedule_group_days (
 --   students.schedule_group_id           uuid references schedule_groups(id) on delete set null
 --   attendance.arrived_at                time   (local arrival time)
 --   settings.parent_alert_delay_minutes  int not null default 60
+--   schedule_groups.teacher_id           uuid references profiles(id) on delete set null
+--                                        (responsible teacher; dashboard staff checklist)
 
--- Course pace (20261012000000_course_pace.sql, Oct 12 2026) — additive, existing RLS covers it:
+-- Parent-reported absences (Oct 2026). Written by the server from the Twilio
+-- webhook; admins review reports on /attendance.
+create table inbound_messages (
+  id              uuid primary key default gen_random_uuid(),
+  from_phone      text not null,
+  body            text not null,
+  twilio_sid      text unique,            -- null for simulated texts
+  guardian_id     uuid references guardians(id) on delete set null,
+  outcome         text not null,          -- 'absence_report' | 'needs_child' | 'forwarded' | 'ignored'
+  pending_date    date,                   -- needs_child: waiting for the parent to name a child
+  pending_reason  text,
+  resolved_at     timestamptz,
+  simulated       boolean not null default false,
+  created_at      timestamptz not null default now()
+);
+
+-- Announcements (Oct 2026): one-off texts to all parents or chosen groups.
+create table announcements (
+  id             uuid primary key default gen_random_uuid(),
+  message        text not null,          -- 1–450 chars
+  audience       text[],                 -- null = all parents; else group ids / 'ungrouped'
+  status         text not null default 'scheduled', -- scheduled|sending|sent|cancelled|failed
+  send_at        timestamptz not null,
+  created_by     uuid references auth.users(id),
+  created_at     timestamptz not null default now(),
+  sent_at        timestamptz,
+  recipients     int,
+  failed_count   int,
+  delivery_mode  text,
+  error          text
+);
+
+create type absence_report_status as enum ('pending','excused','unexcused','dismissed');
+
+create table absence_reports (
+  id                  uuid primary key default gen_random_uuid(),
+  student_id          uuid not null references students(id) on delete cascade,
+  guardian_id         uuid references guardians(id) on delete set null,
+  inbound_message_id  uuid references inbound_messages(id) on delete set null,
+  date                date not null,
+  reason              text,
+  status              absence_report_status not null default 'pending',
+  reviewed_by         uuid references auth.users(id),
+  reviewed_at         timestamptz,
+  created_at          timestamptz not null default now(),
+  updated_at          timestamptz not null default now(),
+  unique (student_id, date)
+);
+
+-- Course pace (20261012000100_course_pace.sql, Oct 12 2026) — additive, existing RLS covers it:
 --   grades.percent_complete              numeric(5,2) null, check 0–100   (GCVS % complete at this snapshot)
 --   grades.missing_assignments           integer null, check >= 0
 --   courses.start_date, courses.end_date date null (per-course window; end >= start)
@@ -264,6 +315,9 @@ as $$ select role from public.profiles where id = auth.uid() $$;
 | school_weekly_patterns, school_breaks, school_special_days | full | read | read |
 | schedule_groups, schedule_group_days | full | read | read |
 | notifications | full | read | read **own** |
+| inbound_messages | read (writes: server only) | none | none |
+| absence_reports | full | read | none |
+| announcements | full | none | none |
 
 **Parent "own children" check** (reusable predicate):
 

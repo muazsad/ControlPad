@@ -341,6 +341,46 @@ async function saveGroupDays(
   return insertError?.message ?? null;
 }
 
+/**
+ * The group's responsible teacher from the form: null for "none", otherwise
+ * it must be an admin or moderator.
+ */
+async function parseGroupTeacher(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  formData: FormData,
+): Promise<{ teacherId: string | null } | { error: string }> {
+  const raw = (formData.get("teacher_id") as string | null)?.trim() ?? "";
+  if (raw === "" || raw === "none") return { teacherId: null };
+  const { data, error } = await supabase
+    .from("profiles")
+    .select("id")
+    .eq("id", raw)
+    .in("role", ["admin", "moderator"])
+    .maybeSingle();
+  if (error) return { error: error.message };
+  if (!data) return { error: "Choose a teacher from the staff list." };
+  return { teacherId: data.id as string };
+}
+
+/** Saves the teacher separately so a missing column (migration not applied) is explained. */
+async function saveGroupTeacher(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  groupId: string,
+  teacherId: string | null,
+): Promise<string | null> {
+  const { error } = await supabase
+    .from("schedule_groups")
+    .update({ teacher_id: teacherId })
+    .eq("id", groupId);
+  if (!error) return null;
+  const missingColumn = /teacher_id/.test(error.message);
+  // Nothing to save yet if no teacher was chosen and the column doesn't exist.
+  if (missingColumn && teacherId === null) return null;
+  return missingColumn
+    ? "Group saved, but the teacher couldn't be: apply the schedule-group teacher migration (supabase db push)."
+    : error.message;
+}
+
 function friendlyGroupError(message: string) {
   return /duplicate key|unique/i.test(message)
     ? "A group with that name already exists."
@@ -357,6 +397,9 @@ export async function createScheduleGroup(
   if (!parsed.ok) return { error: parsed.error, success: null };
 
   const supabase = await createClient();
+  const teacher = await parseGroupTeacher(supabase, formData);
+  if ("error" in teacher) return { error: teacher.error, success: null };
+
   const { data, error } = await supabase
     .from("schedule_groups")
     .insert({ name: parsed.values.name, description: parsed.values.description })
@@ -367,8 +410,14 @@ export async function createScheduleGroup(
   const daysError = await saveGroupDays(supabase, data.id, parsed.values.days);
   if (daysError) return { error: daysError, success: null };
 
+  if (teacher.teacherId) {
+    const teacherError = await saveGroupTeacher(supabase, data.id, teacher.teacherId);
+    if (teacherError) return { error: teacherError, success: null };
+  }
+
   revalidatePath("/settings");
   revalidatePath("/attendance");
+  revalidatePath("/");
   return { error: null, success: `Created ${parsed.values.name}.` };
 }
 
@@ -385,6 +434,9 @@ export async function updateScheduleGroup(
   if (!parsed.ok) return { error: parsed.error, success: null };
 
   const supabase = await createClient();
+  const teacher = await parseGroupTeacher(supabase, formData);
+  if ("error" in teacher) return { error: teacher.error, success: null };
+
   const { error } = await supabase
     .from("schedule_groups")
     .update({ name: parsed.values.name, description: parsed.values.description })
@@ -394,8 +446,12 @@ export async function updateScheduleGroup(
   const daysError = await saveGroupDays(supabase, id, parsed.values.days);
   if (daysError) return { error: daysError, success: null };
 
+  const teacherError = await saveGroupTeacher(supabase, id, teacher.teacherId);
+  if (teacherError) return { error: teacherError, success: null };
+
   revalidatePath("/settings");
   revalidatePath("/attendance");
+  revalidatePath("/");
   return { error: null, success: `Saved ${parsed.values.name}.` };
 }
 

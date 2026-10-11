@@ -40,8 +40,9 @@ ControlPad works without Twilio: every alert is generated and logged on the **Me
 3. **Register for A2P 10DLC** (Messaging → Regulatory Compliance). US carriers block automated texts from local numbers that aren't registered. You register your organization ("brand") and describe the use case ("campaign", e.g. school attendance and account notifications to parents who provided their number). Approval usually takes days to a couple of weeks and has small one-time and monthly fees — start this early. A toll-free number is an alternative with its own verification step. Docs: <https://www.twilio.com/docs/messaging/compliance/a2p-10dlc>
 4. Copy the **Account SID**, **Auth Token** (secret), and your number in E.164 format (e.g. `+1413...`).
 5. In Vercel, add `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_PHONE_NUMBER`, plus `SMS_MODE=test` and `SMS_TEST_NUMBER=<your cell>`. Redeploy.
-6. On **Messages**, press **Send me a test text** (uses your phone from the Staff page). In test mode every alert goes to your cell, labelled with who it was meant for. Watch it for a few school days.
-7. When it looks right, change `SMS_MODE` to `live` (or delete it) and redeploy. Parents start receiving texts.
+6. **Incoming texts (parent-reported absences):** in Twilio → Phone Numbers → your number → *Messaging configuration*, set **"A message comes in"** to Webhook, `https://control-pad.vercel.app/api/sms/inbound`, HTTP **POST**. Save. ControlPad checks Twilio's signature on every request using `TWILIO_AUTH_TOKEN`, so nothing else is needed. (Only if your public URL ever differs from what the app sees, set `TWILIO_INBOUND_URL` to the exact URL entered in Twilio.) Before this is set up you can try it from **Messages → Incoming texts → Simulate text**.
+7. On **Messages**, press **Send me a test text** (uses your phone from the Staff page). In test mode every alert goes to your cell, labelled with who it was meant for. Watch it for a few school days.
+8. When it looks right, change `SMS_MODE` to `live` (or delete it) and redeploy. Parents start receiving texts.
 
 To stop all texting at any time, set `SMS_MODE=off` and redeploy.
 
@@ -62,6 +63,7 @@ Put these in a local `.env.local` (must be gitignored) **and** in Vercel's proje
 | `CRON_SECRET` | you invent a long random string | **NO — secret** |
 | `SMS_MODE` | `off`, `test`, or `live` (defaults to `live` once Twilio is set, `off` before) | no |
 | `SMS_TEST_NUMBER` | your cell in E.164; all texts go here when `SMS_MODE=test` | keep private |
+| `TWILIO_INBOUND_URL` | optional — only if Twilio's webhook URL differs from the app's own URL | no |
 
 `STRIPE_*` variables come later, only if/when you add online payments.
 

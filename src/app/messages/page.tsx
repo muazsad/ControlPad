@@ -16,12 +16,16 @@ import { requireRole } from "@/lib/auth/current-profile";
 import { getSmsConfig, maskPhone, type SmsMode } from "@/lib/sms/send-sms";
 import { createClient } from "@/lib/supabase/server";
 
+import { SimulateInboundForm } from "./simulate-inbound-form";
 import { TestTextButton } from "./test-text-button";
 
 // ── Tunable constants ────────────────────────────────────────────────────────
 
 /** How many recent messages to show. */
 const MESSAGE_LIMIT = 150;
+
+/** How many recent incoming texts to show. */
+const INBOUND_LIMIT = 50;
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -37,6 +41,28 @@ type NotificationRow = {
   students: { first_name: string; last_name: string } | { first_name: string; last_name: string }[] | null;
 };
 
+type InboundRow = {
+  id: string;
+  from_phone: string;
+  body: string;
+  outcome: "absence_report" | "needs_child" | "forwarded" | "ignored";
+  simulated: boolean;
+  created_at: string;
+  guardians: { full_name: string } | { full_name: string }[] | null;
+};
+
+const outcomeDisplay: Record<InboundRow["outcome"], { label: string; tone: StatusTone }> = {
+  absence_report: { label: "Absence report", tone: "warning" },
+  needs_child: { label: "Asked which child", tone: "neutral" },
+  forwarded: { label: "Forwarded to admin", tone: "neutral" },
+  ignored: { label: "Ignored (keyword)", tone: "neutral" },
+};
+
+function senderLabel(row: InboundRow) {
+  const guardian = Array.isArray(row.guardians) ? row.guardians[0] : row.guardians;
+  return guardian?.full_name ?? "Unknown number";
+}
+
 const triggerLabels: Record<string, string> = {
   low_grade: "Low grade",
   absence: "Absence",
@@ -47,6 +73,8 @@ const triggerLabels: Record<string, string> = {
   admin_digest: "Daily digest",
   manual_test: "Test",
   special_day: "Special day",
+  absence_report_reply: "Absence report reply",
+  parent_message: "Parent text (forwarded)",
   pace_behind: "Behind pace",
   missing_assignments: "Missing work",
 };
@@ -109,6 +137,14 @@ export default async function MessagesPage() {
 
   const rows = (data ?? []) as NotificationRow[];
 
+  // Missing table (migration not applied yet) → just hide the log.
+  const { data: inboundData, error: inboundError } = await supabase
+    .from("inbound_messages")
+    .select("id, from_phone, body, outcome, simulated, created_at, guardians(full_name)")
+    .order("created_at", { ascending: false })
+    .limit(INBOUND_LIMIT);
+  const inboundRows = inboundError ? [] : ((inboundData ?? []) as InboundRow[]);
+
   return (
     <AppShell fullName={profile.fullName} role={profile.role}>
       <div className="mx-auto max-w-6xl space-y-6">
@@ -140,6 +176,64 @@ export default async function MessagesPage() {
               <span className="font-medium text-foreground">Test number: </span>
               {config.testNumber ? maskPhone(config.testNumber) : "Not set"}
             </p>
+          </CardContent>
+        </Card>
+
+        <Card className="border shadow-sm">
+          <CardHeader>
+            <CardTitle>Incoming texts</CardTitle>
+            <CardDescription className="max-w-2xl">
+              Texts parents send to the school number. Absences become reports to review on
+              Attendance; anything else is forwarded to admin. Until Twilio is live, use
+              &ldquo;Simulate text&rdquo; with a guardian&apos;s phone number to try it.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <SimulateInboundForm />
+            {inboundRows.length > 0 ? (
+              <DataTable
+                data={inboundRows}
+                getRowKey={(row) => row.id}
+                columns={[
+                  {
+                    key: "when",
+                    header: "When",
+                    cell: (row) => formatTimestamp(row.created_at),
+                    className: "whitespace-nowrap text-muted-foreground",
+                  },
+                  {
+                    key: "from",
+                    header: "From",
+                    cell: (row) => (
+                      <div>
+                        <p className="font-medium">{senderLabel(row)}</p>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          {maskPhone(row.from_phone)}
+                          {row.simulated ? " · simulated" : ""}
+                        </p>
+                      </div>
+                    ),
+                  },
+                  {
+                    key: "message",
+                    header: "Message",
+                    cell: (row) => <p className="max-w-md text-sm leading-5">{row.body}</p>,
+                  },
+                  {
+                    key: "outcome",
+                    header: "Outcome",
+                    cell: (row) => (
+                      <StatusBadge
+                        status={outcomeDisplay[row.outcome]?.label ?? row.outcome}
+                        tone={outcomeDisplay[row.outcome]?.tone ?? "neutral"}
+                      />
+                    ),
+                  },
+                ]}
+              />
+            ) : (
+              <p className="text-sm text-muted-foreground">No incoming texts yet.</p>
+            )}
           </CardContent>
         </Card>
 

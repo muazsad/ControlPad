@@ -8,6 +8,7 @@ import {
 } from "@/lib/schedule/calendar";
 import type { ScheduleGroup } from "@/lib/schedule/student-schedule";
 import {
+  adminReviewMessage,
   minutesIntoDate,
   planAttendanceEscalation,
   runAttendanceTick,
@@ -134,6 +135,29 @@ describe("planAttendanceEscalation", () => {
       plan.parentAlerts.map((s) => s.id),
       ["a2"],
     );
+  });
+
+  it("lists parent-reported students for the admin but never texts their parents", () => {
+    const reported = students.map((s) =>
+      s.id === "a1" || s.id === "a2" ? { ...s, reportedAbsent: true } : s,
+    );
+    const plan = planAttendanceEscalation({
+      date: MONDAY,
+      nowMinutes: at("11:00"),
+      students: reported,
+      groups,
+      calendar,
+      settings,
+    });
+    assert.deepEqual(
+      plan.adminBatches[0].students.map((s) => [s.id, s.state]),
+      [
+        ["a1", "reported"],
+        ["a2", "reported"],
+      ],
+    );
+    assert.equal(plan.parentAlerts.length, 0);
+    assert.match(adminReviewMessage(plan.adminBatches[0], MONDAY), /a1 Test \(parent reported\)/);
   });
 
   it("handles each group on its own times", () => {

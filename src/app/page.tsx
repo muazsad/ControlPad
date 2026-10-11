@@ -23,7 +23,11 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { getPendingAbsenceReports } from "@/lib/absence-reports/reports-data";
 import { getCurrentProfile } from "@/lib/auth/current-profile";
+import { getStaffChecklist } from "@/lib/people/staff-accountability-data";
+import type { TeacherChecklist } from "@/lib/people/staff-accountability";
+
 import {
   getAdminDailySummary,
   todayInSchoolTimeZone,
@@ -46,6 +50,8 @@ import type {
   EscalationStudentResult,
 } from "@/lib/people/escalation";
 import { createClient } from "@/lib/supabase/server";
+
+import { StaffChecklistSection } from "./staff-checklist-section";
 
 function dangerIssueTone(count: number) {
   return count > 0 ? ("danger" as const) : ("success" as const);
@@ -194,10 +200,14 @@ function AdminDashboard({
   fullName,
   summary,
   escalations,
+  pendingAbsenceReports,
+  staffChecklist,
 }: {
   fullName: string;
   summary: AdminDailySummary;
   escalations: EscalationStudentResult[];
+  pendingAbsenceReports: number;
+  staffChecklist: { rows: TeacherChecklist[]; anyTeacherAssigned: boolean } | null;
 }) {
   const gradeIssueCount =
     summary.lowGrades.length + summary.droppingGrades.length;
@@ -315,7 +325,30 @@ function AdminDashboard({
         </div>
       </section>
 
+      {pendingAbsenceReports > 0 ? (
+        <Link
+          href="/attendance"
+          className="flex items-center justify-between gap-3 rounded-lg border border-status-warning/30 bg-status-warning-soft px-4 py-3 text-sm shadow-sm transition-colors hover:bg-status-warning-soft/70"
+        >
+          <span>
+            <span className="font-semibold text-status-warning">
+              {pendingAbsenceReports} parent-reported absence
+              {pendingAbsenceReports === 1 ? "" : "s"}
+            </span>{" "}
+            <span className="text-muted-foreground">waiting for review.</span>
+          </span>
+          <span className="font-medium text-primary">Review →</span>
+        </Link>
+      ) : null}
+
       <CriticalStudentsSection escalations={escalations} />
+
+      {staffChecklist ? (
+        <StaffChecklistSection
+          rows={staffChecklist.rows}
+          anyTeacherAssigned={staffChecklist.anyTeacherAssigned}
+        />
+      ) : null}
 
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
         {cards.map((item) => (
@@ -720,6 +753,8 @@ export default async function HomePage() {
   let children: Student[] = [];
   let adminDailySummary: AdminDailySummary | null = null;
   let adminEscalations: EscalationStudentResult[] = [];
+  let pendingAbsenceReports = 0;
+  let staffChecklist: { rows: TeacherChecklist[]; anyTeacherAssigned: boolean } | null = null;
   if (profile.role === "parent") {
     const supabase = await createClient();
     // RLS guarantees this only returns students linked to this parent.
@@ -732,10 +767,15 @@ export default async function HomePage() {
     children = (data ?? []) as Student[];
   } else if (profile.role === "admin") {
     const today = todayInSchoolTimeZone();
-    [adminDailySummary, adminEscalations] = await Promise.all([
+    let pendingReports: Awaited<ReturnType<typeof getPendingAbsenceReports>>;
+    [adminDailySummary, adminEscalations, pendingReports, staffChecklist] = await Promise.all([
       getAdminDailySummary(today, { now: new Date() }),
       getEscalationStudents(today),
+      getPendingAbsenceReports(),
+      // A checklist failure shouldn't take down the dashboard.
+      getStaffChecklist().catch(() => null),
     ]);
+    pendingAbsenceReports = pendingReports.length;
   }
 
   return (
@@ -747,6 +787,8 @@ export default async function HomePage() {
           fullName={profile.fullName}
           summary={adminDailySummary}
           escalations={adminEscalations}
+          pendingAbsenceReports={pendingAbsenceReports}
+          staffChecklist={staffChecklist}
         />
       ) : (
         <StaffDashboard fullName={profile.fullName} role={profile.role} />

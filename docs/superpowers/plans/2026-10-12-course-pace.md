@@ -3,7 +3,7 @@
 Spec: `docs/superpowers/specs/2026-10-12-course-pace-design.md`
 Branch: `feat/course-pace` (stacked on `feat/grade-sweep`)
 
-- [x] 1. Migration `20261012000000_course_pace.sql` (not applied).
+- [x] 1. Migration `20261012000100_course_pace.sql` (not applied).
 - [x] 2. `lib/grades/pace.ts` + tests.
 - [x] 3. `sweep.ts` snapshot rules + tests.
 - [x] 4. `lib/grades/pace-data.ts` (shared context loader); `NotificationTrigger` values.
