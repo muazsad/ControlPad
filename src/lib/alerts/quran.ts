@@ -126,6 +126,8 @@ export function createSupabaseQuranAlertDatabase(): QuranAlertDatabase {
         .from("quran_progress")
         .select("student_id, date")
         .in("student_id", studentIds)
+        // Only new memorization (sabaq) resets the inactivity clock.
+        .eq("lesson_type", "sabaq")
         .order("date", { ascending: false });
       if (latestError) throw new Error(latestError.message);
 

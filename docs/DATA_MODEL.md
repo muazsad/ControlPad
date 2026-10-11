@@ -23,7 +23,9 @@ create type attendance_status    as enum ('present', 'tardy', 'absent', 'excused
 create type payment_status       as enum ('paid', 'unpaid');
 create type notification_trigger as enum ('low_grade','absence','tardy_threshold','quran_slip','payment_overdue','admin_digest',
                                           'absence_review','manual_test',    -- added Oct 2026
-                                          'special_day','pace_behind','missing_assignments'); -- pace_* added Oct 12 2026
+                                          'special_day','pace_behind','missing_assignments', -- pace_* added Oct 12 2026
+                                          'revision_overdue');                -- added Oct 16 2026
+create type quran_lesson_type    as enum ('sabaq','sabaq_para','dhor');      -- added Oct 16 2026
 create type notification_status  as enum ('queued','sent','failed','dry_run'); -- dry_run added Oct 2026
 ```
 
@@ -111,10 +113,22 @@ create table quran_progress (
   from_ayah         int,
   to_ayah           int,
   lines_memorized   numeric not null default 0,
-  cumulative_lines  numeric,              -- optional running total
+  cumulative_lines  numeric,              -- UNUSED: totals are always summed from raw sabaq rows
   note              text,
   recorded_by       uuid references auth.users(id),
-  recorded_at       timestamptz not null default now()
+  recorded_at       timestamptz not null default now(),
+  lesson_type       quran_lesson_type not null default 'sabaq', -- Oct 16 2026; only sabaq is memorization
+  juz               smallint check (juz between 1 and 30)     -- set on sabaq_para / dhor rows
+);
+
+-- Juz a student has memorized (Oct 16 2026). Revising a juz upserts it here.
+create table student_memorized_juz (
+  id          uuid primary key default gen_random_uuid(),
+  student_id  uuid not null references students(id) on delete cascade,
+  juz         smallint not null check (juz between 1 and 30),
+  marked_at   date not null default current_date,
+  created_at  timestamptz not null default now(),
+  unique (student_id, juz)
 );
 
 create table payments (
@@ -290,6 +304,9 @@ create table absence_reports (
 
 -- Stale grade data (20261015000000_stale_grade_setting.sql, Oct 15 2026):
 --   settings.stale_grade_school_days     integer not null default 10 (1–90)
+
+-- Hifz revision (20261016000000_quran_lesson_types.sql, Oct 16 2026):
+--   settings.revision_overdue_school_days integer not null default 21 (1–180)
 ```
 
 ---
@@ -311,7 +328,7 @@ as $$ select role from public.profiles where id = auth.uid() $$;
 
 | Table | Admin | Moderator | Parent |
 |-------|-------|-----------|--------|
-| students, courses, grades, attendance, quran_progress | full | read + write | read **own children only** |
+| students, courses, grades, attendance, quran_progress, student_memorized_juz | full | read + write | read **own children only** |
 | guardians, student_guardians | full | read | read **own record / own children** |
 | payments | full | read | read **own children only** |
 | settings | read + write | read | none |
@@ -385,7 +402,10 @@ create policy students_parent_read on students
 - **Absence escalation** = at `absence_check_time`, admin gets one text per group listing students
   with no attendance row or `absent`; `parent_alert_delay_minutes` later, parents of students still
   unmarked/absent are texted.
-- **Quran slip** = days since the latest `quran_progress.date` exceeds `settings.quran_inactivity_days`.
+- **Memorized lines** = sum of `lines_memorized` over `lesson_type = 'sabaq'` rows only.
+- **Quran slip** = school days since the latest **sabaq** `quran_progress.date` reach `settings.quran_inactivity_days`.
+- **Revision overdue** = for a row in `student_memorized_juz`, school days since the latest `sabaq_para`/`dhor`
+  row for that juz (else `marked_at`) exceed `settings.revision_overdue_school_days`.
 - **Overdue payment** = no `payments` row with `status='paid'` for the current `period_month` once the day of month passes `settings.payment_due_day`.
 - **School day** = configured weekly pattern minus breaks and whole-school special days that close
   school (`no_school`, or `students_expected = false`); `half_day` special days count as school

@@ -9,6 +9,7 @@ import { StatusBadge } from "@/components/controlpad/status-badge";
 import { Card } from "@/components/ui/card";
 import { getCurrentProfile } from "@/lib/auth/current-profile";
 import { studentName, type Student } from "@/lib/people/people";
+import { isRevision } from "@/lib/quran/lessons";
 import { createClient } from "@/lib/supabase/server";
 import { QuranBulkForm, QuranBulkFormEmpty } from "./quran-bulk-form";
 
@@ -23,6 +24,7 @@ type ParentProgressRow = {
   student: Student;
   latest: LatestEntry | null;
   totalLines: number;
+  lastRevision: string | null;
 };
 
 function todayIso() {
@@ -78,6 +80,8 @@ export default async function QuranPage() {
           .from("quran_progress")
           .select("student_id, date, surah, lines_memorized")
           .in("student_id", studentIds)
+          // "Last lesson" and the slip highlight track new memorization only.
+          .eq("lesson_type", "sabaq")
           .order("date", { ascending: false })
           .order("recorded_at", { ascending: false })
       : { data: [] };
@@ -96,7 +100,7 @@ export default async function QuranPage() {
         <div className="mx-auto max-w-6xl space-y-6">
           <PageHeader
             title="Quran / Hifz"
-            description="Log today's memorized lines for all students in one go. Blank rows are skipped."
+            description="Log today's sabaq (new lines), sabaq para and dhor for every student in one go. Only sabaq counts toward memorized totals."
           />
           <Card className="overflow-hidden border shadow-sm">
             {students.length === 0 ? (
@@ -142,17 +146,23 @@ export default async function QuranPage() {
   const { data: progressData } = studentIds.length > 0
     ? await supabase
         .from("quran_progress")
-        .select("student_id, date, surah, lines_memorized")
+        .select("student_id, date, surah, lines_memorized, lesson_type")
         .in("student_id", studentIds)
         .order("date", { ascending: false })
     : { data: [] };
 
   const rows = progressData ?? [];
 
-  // Build per-student summary.
+  // Build per-student summary. Totals and "last lesson" are sabaq only;
+  // revision (sabaq para / dhor) only feeds the last revision date.
   const latestMap = new Map<string, LatestEntry>();
   const totalLinesMap = new Map<string, number>();
-  for (const row of rows as LatestEntry[]) {
+  const lastRevisionMap = new Map<string, string>();
+  for (const row of rows as (LatestEntry & { lesson_type: string | null })[]) {
+    if (isRevision(row)) {
+      if (!lastRevisionMap.has(row.student_id)) lastRevisionMap.set(row.student_id, row.date);
+      continue;
+    }
     if (!latestMap.has(row.student_id)) {
       latestMap.set(row.student_id, row);
     }
@@ -166,6 +176,7 @@ export default async function QuranPage() {
     student: s,
     latest: latestMap.get(s.id) ?? null,
     totalLines: totalLinesMap.get(s.id) ?? 0,
+    lastRevision: lastRevisionMap.get(s.id) ?? null,
   }));
 
   return (
@@ -235,8 +246,18 @@ export default async function QuranPage() {
               },
             },
             {
+              key: "revision",
+              header: "Last revision",
+              cell: (row) =>
+                row.lastRevision ? (
+                  <span className="text-sm">{row.lastRevision}</span>
+                ) : (
+                  <span className="text-muted-foreground">—</span>
+                ),
+            },
+            {
               key: "total",
-              header: "Total lines",
+              header: "Memorized lines",
               cell: (row) =>
                 row.totalLines > 0 ? (
                   <span className="font-medium">{row.totalLines}</span>

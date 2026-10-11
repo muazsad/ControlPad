@@ -51,11 +51,13 @@ export function dailySummarySeverity(
     summary.lowGrades.length +
     summary.quranSlippage.length +
     summary.overduePayments.length +
+    summary.revisionOverdue.length +
     paceItems.filter((issue) => issue.tone === "danger").length;
   const warningCount =
     summary.tardies.length +
     summary.unmarked.length +
     summary.droppingGrades.length +
+    summary.sabaqWithoutRevision.length +
     paceItems.filter((issue) => issue.tone !== "danger").length;
 
   if (dangerCount > 0) {

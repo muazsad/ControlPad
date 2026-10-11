@@ -319,4 +319,31 @@ describe("computeStudentEscalations", () => {
     assert.equal(result.signals.missing.tripped, false);
     assert.equal(result.level, "ok");
   });
+
+  it("adds a capped revision-overdue signal", () => {
+    const [result] = computeStudentEscalations(
+      [
+        {
+          ...baseStudent,
+          grades: [],
+          attendance: [],
+          quranProgress: [],
+          payments: [],
+          notifications: [],
+          revisionOverdueJuz: [3, 7, 12, 20],
+        },
+      ],
+      {
+        asOfDate: "2026-07-01",
+        gradeFloor: 70,
+        tardiesPerWeek: 3,
+        quranInactivityDays: 7,
+        paymentDueDay: 5,
+      },
+    );
+    assert.equal(result.signals.revision.tripped, true);
+    assert.equal(result.signals.revision.score, 2); // capped at REVISION_OVERDUE_MAX_COUNTED
+    assert.deepEqual(result.signals.revision.overdueJuz, [3, 7, 12, 20]);
+    assert.equal(result.level, "watch");
+  });
 });

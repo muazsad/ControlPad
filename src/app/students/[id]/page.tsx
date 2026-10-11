@@ -178,6 +178,7 @@ export default async function StudentDetailPage({
       .from("quran_progress")
       .select("date, lines_memorized")
       .eq("student_id", id)
+      .eq("lesson_type", "sabaq") // memorization only; revision doesn't count
       .gte("date", cutoff)
       .order("date", { ascending: false }),
     supabase

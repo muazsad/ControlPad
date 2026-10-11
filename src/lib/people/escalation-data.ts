@@ -1,3 +1,5 @@
+import { sabaqOnly } from "@/lib/quran/lessons";
+import { juzRevisionStatuses, overdueJuz } from "@/lib/quran/revision";
 import { createClient } from "@/lib/supabase/server";
 import {
   ESCALATION_WINDOW_DAYS,
@@ -39,6 +41,8 @@ type QuranRow = {
   student_id: string;
   date: string;
   lines_memorized: number | string;
+  lesson_type: string | null;
+  juz: number | null;
 };
 
 type PaymentRow = {
@@ -219,10 +223,13 @@ export async function getEscalationStudents(
     paymentsResult,
     notificationsResult,
     paceEntries,
+    memorizedResult,
   ] = await Promise.all([
     supabase
       .from("settings")
-      .select("grade_floor, tardies_per_week, quran_inactivity_days, payment_due_day")
+      .select(
+        "grade_floor, tardies_per_week, quran_inactivity_days, payment_due_day, revision_overdue_school_days",
+      )
       .eq("id", 1)
       .single(),
     supabase
@@ -243,7 +250,7 @@ export async function getEscalationStudents(
       .lte("date", endDate),
     supabase
       .from("quran_progress")
-      .select("student_id, date, lines_memorized")
+      .select("student_id, date, lines_memorized, lesson_type, juz")
       .lte("date", endDate)
       .order("date", { ascending: true }),
     supabase
@@ -257,6 +264,7 @@ export async function getEscalationStudents(
       .gte("created_at", startIso)
       .lte("created_at", `${endDate}T23:59:59.999Z`),
     loadPaceContext().then((context) => loadPaceEntries(supabase, context, endDate)),
+    supabase.from("student_memorized_juz").select("student_id, juz, marked_at"),
   ]);
 
   if (settingsResult.error) throw new Error(settingsResult.error.message);
@@ -265,6 +273,7 @@ export async function getEscalationStudents(
   if (attendanceResult.error) throw new Error(attendanceResult.error.message);
   if (quranResult.error) throw new Error(quranResult.error.message);
   if (paymentsResult.error) throw new Error(paymentsResult.error.message);
+  if (memorizedResult.error) throw new Error(memorizedResult.error.message);
   if (notificationsResult.error) {
     throw new Error(notificationsResult.error.message);
   }
@@ -283,6 +292,9 @@ export async function getEscalationStudents(
     (attendanceResult.data ?? []) as AttendanceRow[],
   );
   const quranByStudent = groupByStudent((quranResult.data ?? []) as QuranRow[]);
+  const memorizedByStudent = groupByStudent(
+    (memorizedResult.data ?? []) as { student_id: string; juz: number; marked_at: string }[],
+  );
   const payments = (paymentsResult.data ?? []) as PaymentRow[];
   const notificationsByStudent = groupByStudent(
     ((notificationsResult.data ?? []) as NotificationRow[]).filter(
@@ -339,12 +351,25 @@ export async function getEscalationStudents(
           status: record.status,
         }),
       ),
-      quranProgress: (quranByStudent.get(student.id) ?? []).map((entry) => ({
+      // Only sabaq (new memorization) feeds the Quran signal.
+      quranProgress: sabaqOnly(quranByStudent.get(student.id) ?? []).map((entry) => ({
         date: entry.date,
         lines_memorized: Number(entry.lines_memorized),
       })),
       payments: studentPayments,
       paceCourses: paceEntries.get(student.id) ?? [],
+      revisionOverdueJuz: overdueJuz(
+        juzRevisionStatuses({
+          memorized: (memorizedByStudent.get(student.id) ?? []).map((row) => ({
+            juz: row.juz,
+            markedAt: row.marked_at,
+          })),
+          entries: quranByStudent.get(student.id) ?? [],
+          asOfDate: endDate,
+          thresholdSchoolDays: Number(settingsResult.data.revision_overdue_school_days),
+          calendar,
+        }),
+      ).map((status) => status.juz),
       notifications: (notificationsByStudent.get(student.id) ?? []).map(
         (notification): EscalationNotificationEntry => ({
           createdAt: notification.created_at,

@@ -25,6 +25,7 @@ const validSettings = {
   pace_gap_threshold: "10",
   missing_assignments_threshold: "3",
   stale_grade_school_days: "10",
+  revision_overdue_school_days: "21",
 };
 
 describe("parseSettingsForm", () => {
@@ -45,6 +46,7 @@ describe("parseSettingsForm", () => {
         pace_gap_threshold: 10,
         missing_assignments_threshold: 3,
         stale_grade_school_days: 10,
+        revision_overdue_school_days: 21,
       },
     });
   });
@@ -66,6 +68,7 @@ describe("parseSettingsForm", () => {
     );
     assert.equal(parseSettingsForm(form({ ...validSettings, pace_gap_threshold: "0" })).ok, false);
     assert.equal(parseSettingsForm(form({ ...validSettings, stale_grade_school_days: "0" })).ok, false);
+    assert.equal(parseSettingsForm(form({ ...validSettings, revision_overdue_school_days: "0" })).ok, false);
     assert.equal(
       parseSettingsForm(form({ ...validSettings, missing_assignments_threshold: "2.5" })).ok,
       false,

@@ -1,3 +1,4 @@
+import { sabaqOnly } from "@/lib/quran/lessons";
 import { createClient } from "@/lib/supabase/server";
 import { studentName, type EnrollmentStatus } from "@/lib/people/people";
 import {
@@ -30,7 +31,7 @@ type RawCourse = {
   end_date: string | null;
   grades: RawGrade[];
 };
-type RawQuranEntry = { date: string; lines_memorized: number };
+type RawQuranEntry = { date: string; lines_memorized: number; lesson_type?: string | null };
 type RawAttendance = { status: "present" | "tardy" | "absent" | "excused"; date: string };
 
 type RawStudent = {
@@ -124,7 +125,7 @@ export async function getAllStudentMetrics(): Promise<StudentMetricsRow[]> {
     .select(
       `id, first_name, last_name, grade_level, enrollment_status, schedule_group_id,
        courses(id, name, created_at, start_date, end_date, grades(grade_value, recorded_at, percent_complete, missing_assignments)),
-       quran_progress(date, lines_memorized),
+       quran_progress(date, lines_memorized, lesson_type),
        attendance(status, date)`,
     )
     .order("last_name", { ascending: true });
@@ -136,7 +137,8 @@ export async function getAllStudentMetrics(): Promise<StudentMetricsRow[]> {
       .map((c) => latestGradeValue(c.grades))
       .filter((v): v is number => v !== null);
 
-    const quranEntries = s.quran_progress.filter((e) => e.date >= cutoff);
+    // Only sabaq (new memorization) counts toward the Quran score.
+    const quranEntries = sabaqOnly(s.quran_progress).filter((e) => e.date >= cutoff);
     const attendanceRecords = s.attendance
       .filter((a) => a.date >= cutoff)
       .map(({ status }) => ({ status }));

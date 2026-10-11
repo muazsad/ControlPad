@@ -35,6 +35,11 @@ export const PACE_FAR_BEHIND_SCORE = 2;
 export const MISSING_WORK_SCORE = 1;
 export const MISSING_WORK_HEAVY_SCORE = 2;
 
+/** Score per memorized juz overdue for revision (sabaq para / dhor). */
+export const REVISION_OVERDUE_SCORE = 1;
+/** At most this many overdue juz count toward the score and occurrences. */
+export const REVISION_OVERDUE_MAX_COUNTED = 2;
+
 // ── Types ────────────────────────────────────────────────────────────────────
 
 export type EscalationLevel = "ok" | "watch" | "critical";
@@ -44,7 +49,8 @@ export type EscalationSignalKey =
   | "quran"
   | "payments"
   | "pace"
-  | "missing";
+  | "missing"
+  | "revision";
 
 export type EscalationGradeEntry = {
   date: string;
@@ -91,6 +97,8 @@ export type EscalationStudentInput = {
   notifications: EscalationNotificationEntry[];
   /** Optional: omitted means no pace data, so the pace/missing signals stay quiet. */
   paceCourses?: EscalationPaceEntry[];
+  /** Optional: memorized juz currently overdue for revision. */
+  revisionOverdueJuz?: number[];
 };
 
 export type EscalationSettings = {
@@ -141,6 +149,10 @@ export type MissingWorkEscalationSignal = EscalationSignalBreakdown & {
   courses: number;
 };
 
+export type RevisionEscalationSignal = EscalationSignalBreakdown & {
+  overdueJuz: number[];
+};
+
 export type EscalationStudentResult = {
   studentId: string;
   studentName: string;
@@ -156,6 +168,7 @@ export type EscalationStudentResult = {
     payments: PaymentEscalationSignal;
     pace: PaceEscalationSignal;
     missing: MissingWorkEscalationSignal;
+    revision: RevisionEscalationSignal;
   };
 };
 
@@ -434,6 +447,24 @@ function missingWorkSignal(
   );
 }
 
+function revisionSignal(
+  overdueJuz: number[],
+  settings: EscalationSettings,
+): RevisionEscalationSignal {
+  const counted = Math.min(overdueJuz.length, REVISION_OVERDUE_MAX_COUNTED);
+  const signal = baseSignal({
+    occurrences: counted,
+    score: counted * REVISION_OVERDUE_SCORE,
+    dates: [],
+    asOfDate: settings.asOfDate,
+    details:
+      overdueJuz.length > 0
+        ? `${overdueJuz.length} juz overdue for revision (Juz ${overdueJuz.join(", ")})`
+        : "No juz overdue for revision",
+  });
+  return { ...signal, overdueJuz };
+}
+
 // ── Public functions ─────────────────────────────────────────────────────────
 
 export function computeStudentEscalations(
@@ -453,6 +484,7 @@ export function computeStudentEscalations(
         ),
         pace: paceSignal(student.paceCourses ?? [], settings),
         missing: missingWorkSignal(student.paceCourses ?? [], settings),
+        revision: revisionSignal(student.revisionOverdueJuz ?? [], settings),
       };
       const signalList = Object.entries(signals) as [
         EscalationSignalKey,

@@ -4,6 +4,12 @@ import { computeOverduePaymentCycles } from "@/lib/alerts/payment-overdue";
 import { evaluateQuranInactivity } from "@/lib/alerts/quran";
 import { bySeverity } from "@/lib/alerts/admin-dashboard-severity";
 import { studentGradeHealth } from "@/lib/grades/grade-health";
+import { sabaqOnly } from "@/lib/quran/lessons";
+import {
+  juzRevisionStatuses,
+  overdueJuz,
+  sabaqWithoutRevision,
+} from "@/lib/quran/revision";
 import { paceForCourse, type PaceContext } from "@/lib/grades/pace";
 import { trendTone, TREND_DASHBOARD_TOP_COUNT, type TrendTone } from "@/lib/grades/trend";
 import { getServiceSchoolCalendar } from "@/lib/schedule/calendar-data";
@@ -38,6 +44,7 @@ export type AdminDigestSettings = {
   paceGapThreshold: number;
   missingAssignmentsThreshold: number;
   staleGradeSchoolDays: number;
+  revisionOverdueSchoolDays: number;
 };
 
 export type AttendanceIssue = {
@@ -128,6 +135,22 @@ export type GradeDropIssue = {
   tone: TrendTone;
 };
 
+/** Memorized juz with no sabaq para / dhor for too many school days. */
+export type RevisionOverdueIssue = {
+  studentId: string;
+  studentName: string;
+  juz: number[];
+  tone: "danger";
+};
+
+/** Keeps memorizing (sabaq) but logged no revision in the recent window. */
+export type SabaqWithoutRevisionIssue = {
+  studentId: string;
+  studentName: string;
+  sabaqCount: number;
+  tone: "warning";
+};
+
 export type AdminDailySummary = {
   date: string;
   schoolDayType: CalendarDayType;
@@ -142,6 +165,8 @@ export type AdminDailySummary = {
   staleCourses: StaleCourseIssue[];
   biggestDrops: GradeDropIssue[];
   quranSlippage: QuranSlipIssue[];
+  revisionOverdue: RevisionOverdueIssue[];
+  sabaqWithoutRevision: SabaqWithoutRevisionIssue[];
   overduePayments: OverduePaymentIssue[];
 };
 
@@ -198,6 +223,8 @@ export type GradeIssueRow = {
 type QuranRow = {
   student_id: string;
   date: string;
+  lesson_type: string | null;
+  juz: number | null;
 };
 
 type PaymentRow = {
@@ -310,6 +337,8 @@ function issueCount(summary: AdminDailySummary) {
     summary.behindPace.length +
     summary.missingWork.length +
     summary.quranSlippage.length +
+    summary.revisionOverdue.length +
+    summary.sabaqWithoutRevision.length +
     summary.overduePayments.length
   );
 }
@@ -521,6 +550,73 @@ export function summarizeGradeHealth(input: {
   };
 }
 
+/**
+ * Revision issues from the bulk Quran rows (any order) and memorized juz:
+ * students with overdue juz (danger) and students memorizing without revising
+ * (warning, dashboard/digest only). Ordered most severe first.
+ */
+export function summarizeRevisionIssues(input: {
+  quranRows: { student_id: string; date: string; lesson_type: string | null; juz: number | null }[];
+  memorizedRows: { student_id: string; juz: number; marked_at: string }[];
+  students: { id: string; name: string }[];
+  thresholdSchoolDays: number;
+  calendar: SchoolCalendarConfig;
+  today: string;
+}): {
+  revisionOverdue: RevisionOverdueIssue[];
+  sabaqWithoutRevision: SabaqWithoutRevisionIssue[];
+} {
+  const entriesByStudent = new Map<string, typeof input.quranRows>();
+  for (const row of input.quranRows) {
+    const list = entriesByStudent.get(row.student_id) ?? [];
+    list.push(row);
+    entriesByStudent.set(row.student_id, list);
+  }
+  const memorizedByStudent = new Map<string, { juz: number; markedAt: string }[]>();
+  for (const row of input.memorizedRows) {
+    const list = memorizedByStudent.get(row.student_id) ?? [];
+    list.push({ juz: row.juz, markedAt: row.marked_at });
+    memorizedByStudent.set(row.student_id, list);
+  }
+
+  const revisionOverdue: RevisionOverdueIssue[] = [];
+  const withoutRevision: SabaqWithoutRevisionIssue[] = [];
+  for (const student of input.students) {
+    const entries = entriesByStudent.get(student.id) ?? [];
+    const overdue = overdueJuz(
+      juzRevisionStatuses({
+        memorized: memorizedByStudent.get(student.id) ?? [],
+        entries,
+        asOfDate: input.today,
+        thresholdSchoolDays: input.thresholdSchoolDays,
+        calendar: input.calendar,
+      }),
+    );
+    if (overdue.length > 0) {
+      revisionOverdue.push({
+        studentId: student.id,
+        studentName: student.name,
+        juz: overdue.map((status) => status.juz),
+        tone: "danger",
+      });
+    }
+    const flag = sabaqWithoutRevision({ entries, asOfDate: input.today, calendar: input.calendar });
+    if (flag.flagged) {
+      withoutRevision.push({
+        studentId: student.id,
+        studentName: student.name,
+        sabaqCount: flag.sabaqCount,
+        tone: "warning",
+      });
+    }
+  }
+
+  return {
+    revisionOverdue: revisionOverdue.sort(bySeverity((issue) => issue.juz.length)),
+    sabaqWithoutRevision: withoutRevision.sort(bySeverity((issue) => issue.sabaqCount)),
+  };
+}
+
 function namesForDigest(summary: AdminDailySummary) {
   const names = [
     ...summary.absences.map((issue) => issue.studentName),
@@ -531,6 +627,8 @@ function namesForDigest(summary: AdminDailySummary) {
     ...summary.behindPace.map((issue) => issue.studentName),
     ...summary.missingWork.map((issue) => issue.studentName),
     ...summary.quranSlippage.map((issue) => issue.studentName),
+    ...summary.revisionOverdue.map((issue) => issue.studentName),
+    ...summary.sabaqWithoutRevision.map((issue) => issue.studentName),
     ...summary.overduePayments.map((issue) => issue.studentName),
   ];
   return Array.from(new Set(names)).slice(0, 5);
@@ -544,7 +642,7 @@ export function createSupabaseAdminDigestDatabase(): AdminDigestDatabase {
       const { data: settingsRow, error: settingsError } = await supabase
         .from("settings")
         .select(
-          "admin_digest_time, grade_floor, quran_inactivity_days, payment_due_day, school_start, tardy_window_hours, term_start, term_end, pace_gap_threshold, missing_assignments_threshold, stale_grade_school_days",
+          "admin_digest_time, grade_floor, quran_inactivity_days, payment_due_day, school_start, tardy_window_hours, term_start, term_end, pace_gap_threshold, missing_assignments_threshold, stale_grade_school_days, revision_overdue_school_days",
         )
         .eq("id", 1)
         .single();
@@ -559,6 +657,7 @@ export function createSupabaseAdminDigestDatabase(): AdminDigestDatabase {
         paceGapThreshold: Number(settingsRow.pace_gap_threshold),
         missingAssignmentsThreshold: Number(settingsRow.missing_assignments_threshold),
         staleGradeSchoolDays: Number(settingsRow.stale_grade_school_days),
+        revisionOverdueSchoolDays: Number(settingsRow.revision_overdue_school_days),
       };
       const [calendar, groups] = await Promise.all([
         getServiceSchoolCalendar(),
@@ -573,6 +672,7 @@ export function createSupabaseAdminDigestDatabase(): AdminDigestDatabase {
         studentsResult,
         quranResult,
         paidPaymentsResult,
+        memorizedResult,
       ] = await Promise.all([
         // Not gated on the school-wide calendar: grouped students may attend
         // on days the rest of the school is off (e.g. a Quran-only Friday).
@@ -594,18 +694,20 @@ export function createSupabaseAdminDigestDatabase(): AdminDigestDatabase {
           .eq("enrollment_status", "active"),
         supabase
           .from("quran_progress")
-          .select("student_id, date")
+          .select("student_id, date, lesson_type, juz")
           .order("date", { ascending: false }),
         supabase
           .from("payments")
           .select("student_id, period_month, status")
-          .eq("period_month", periodMonthFor(date))
+          .eq("period_month", periodMonthFor(date)),
+        supabase.from("student_memorized_juz").select("student_id, juz, marked_at")
       ]);
 
       if (attendanceResult.error) throw new Error(attendanceResult.error.message);
       if (gradesResult.error) throw new Error(gradesResult.error.message);
       if (studentsResult.error) throw new Error(studentsResult.error.message);
       if (quranResult.error) throw new Error(quranResult.error.message);
+      if (memorizedResult.error) throw new Error(memorizedResult.error.message);
       if (paidPaymentsResult.error) {
         throw new Error(paidPaymentsResult.error.message);
       }
@@ -689,7 +791,9 @@ export function createSupabaseAdminDigestDatabase(): AdminDigestDatabase {
       });
 
       const latestQuranDate = new Map<string, string>();
-      for (const row of (quranResult.data ?? []) as QuranRow[]) {
+      const quranRows = (quranResult.data ?? []) as QuranRow[];
+      // Slippage = no new memorization: only sabaq counts.
+      for (const row of sabaqOnly(quranRows)) {
         if (!latestQuranDate.has(row.student_id)) {
           latestQuranDate.set(row.student_id, row.date);
         }
@@ -720,6 +824,19 @@ export function createSupabaseAdminDigestDatabase(): AdminDigestDatabase {
               };
             })
         : [];
+
+      const { revisionOverdue, sabaqWithoutRevision } = summarizeRevisionIssues({
+        quranRows,
+        memorizedRows: (memorizedResult.data ?? []) as {
+          student_id: string;
+          juz: number;
+          marked_at: string;
+        }[],
+        students: students.map((student) => ({ id: student.id, name: studentName(student) })),
+        thresholdSchoolDays: settings.revisionOverdueSchoolDays,
+        calendar,
+        today: date,
+      });
 
       const paymentRows = (paidPaymentsResult.data ?? []) as PaymentRow[];
       const paymentByStudent = new Map(
@@ -763,6 +880,8 @@ export function createSupabaseAdminDigestDatabase(): AdminDigestDatabase {
         staleCourses,
         biggestDrops,
         quranSlippage,
+        revisionOverdue,
+        sabaqWithoutRevision,
         overduePayments,
       };
     },
@@ -800,7 +919,9 @@ export function formatAdminDigestSms(summary: AdminDailySummary) {
     (summary.unmarked.length > 0 ? `Not checked in ${summary.unmarked.length}, ` : "") +
     `Low grades ${summary.lowGrades.length}, Dropping ${summary.droppingGrades.length}, ` +
     `Behind pace ${summary.behindPace.length}, Missing work ${summary.missingWork.length}, ` +
-    `Quran ${summary.quranSlippage.length}, Payments ${summary.overduePayments.length}.`;
+    `Quran ${summary.quranSlippage.length}, Revision overdue ${summary.revisionOverdue.length}, ` +
+    `Sabaq without revision ${summary.sabaqWithoutRevision.length}, ` +
+    `Payments ${summary.overduePayments.length}.`;
   const staleNote =
     summary.staleCourses.length > 0
       ? ` ${summary.staleCourses.length} course${summary.staleCourses.length === 1 ? "" : "s"} not updated in ${summary.settings.staleGradeSchoolDays}+ school days.`

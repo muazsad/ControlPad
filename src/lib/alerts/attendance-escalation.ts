@@ -3,6 +3,7 @@ import { sendSms, type SendSmsInput, type SmsResult } from "@/lib/sms/send-sms";
 import { sendAdminDigest } from "@/lib/alerts/admin-digest";
 import { checkTardyThresholdAlerts } from "@/lib/alerts/attendance";
 import { checkQuranSlipAlerts } from "@/lib/alerts/quran";
+import { checkRevisionOverdueAlerts } from "@/lib/alerts/revision";
 import {
   sendSpecialDayNotice,
   shouldAutoSendSpecialDayNotice,
@@ -425,7 +426,23 @@ export async function runAttendanceTick(
   const send = deps.sendSms ?? sendSms;
   const checkTardies =
     deps.checkTardies ?? ((date: string) => checkTardyThresholdAlerts({ date }));
-  const checkQuran = deps.checkQuran ?? ((date: string) => checkQuranSlipAlerts(date));
+  // The daily Quran check covers inactivity (quran_slip) and memorized juz
+  // that need revision (revision_overdue). A revision failure doesn't stop slip texts.
+  const checkQuran =
+    deps.checkQuran ??
+    (async (date: string) => {
+      const slip = await checkQuranSlipAlerts(date);
+      let revisionMessages = 0;
+      try {
+        revisionMessages = (await checkRevisionOverdueAlerts(date)).messages;
+      } catch (error) {
+        console.error(
+          "Revision overdue check failed",
+          error instanceof Error ? error.message : "unknown error",
+        );
+      }
+      return { messages: slip.messages + revisionMessages };
+    });
   const sendNotice =
     deps.sendSpecialDayNotice ??
     ((date: string, now: Date) => sendSpecialDayNotice({ date, now }));
@@ -468,7 +485,7 @@ export async function runAttendanceTick(
     tardyCheck = { ran: true, messages: result.messages };
   }
 
-  // Daily Quran inactivity check at QURAN_CHECK_TIME (local), year-round.
+  // Daily Quran checks (inactivity + revision overdue) at QURAN_CHECK_TIME (local), year-round.
   let quranCheck = { ran: false, messages: 0 };
   const quranMinutes = timeToMinutes(QURAN_CHECK_TIME);
   if (

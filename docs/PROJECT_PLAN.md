@@ -66,11 +66,15 @@ Guiding principle: **catch problems early and notify the right person automatica
   3. After the day's last parent-alert time → `tardies_per_week` tardies over the last 7 school days → SMS to **parent**.
 
 ### 3.4 Quran / Hifz progress
-- Per student, log each lesson: date, surah, ayah range, lines memorized, running cumulative total.
-- Bulk entry form is simplified: staff only enter **lines memorized**.
-- Per-student progress chart at `/quran/[studentId]`.
+- Three lesson types (`quran_progress.lesson_type`): **sabaq** (new memorization), **sabaq para** (recent revision) and **dhor** (old revision); revision rows carry a `juz` (1–30).
+- **Only sabaq counts as memorization**: totals, the chart's memorization line, the Quran score (`performance.ts` via `student-metrics.ts`), Top Performers, escalation and the `quran_slip` check all filter `lesson_type = 'sabaq'` (`lib/quran/lessons.ts`). Totals are summed from raw entries (`cumulative_lines` is unused).
+- Bulk entry (`/quran`): per student, **Sabaq lines | Sabaq para juz | Dhor juz** (several, shown as chips). Each filled box is its own row; Enter moves to the next box. One batch insert per submit; any revised juz is auto-added to the student's memorized juz.
+- `/quran/[studentId]`: a **30-cell memorized-juz grid** (staff click to mark/unmark; green = revised recently, amber = past 70% of the threshold (`REVISION_WARNING_FRACTION`), red = overdue; tooltip shows last revision + school days since), the sabaq-only chart with revision entries as small bars, and the lesson history with type and juz.
+- **Revision overdue** (`lib/quran/revision.ts`): a memorized juz whose latest sabaq para / dhor (or, if never revised, `marked_at`) is more than `revision_overdue_school_days` school days ago — counted with the school calendar like the inactivity check.
+- **Sabaq without revision** (dashboard/digest only, no SMS): ≥ 3 sabaq entries and no revision in the last 10 school days (`SABAQ_WITHOUT_REVISION_MIN_SABAQ`, `SABAQ_WITHOUT_REVISION_WINDOW`).
 - Calendar-aware: breaks and no-school days don't count as inactivity.
-- **Alert (cron):** no new memorization in `quran_inactivity_days` school days → SMS to **parent + admin**.
+- **Alerts (daily, from the 10-minute tick at `QURAN_CHECK_TIME`, skipped on no-school days):** no new memorization (sabaq) in `quran_inactivity_days` school days → `quran_slip` to **parent + admin**; memorized juz overdue for revision → `revision_overdue` to **parent + admin**, one text per student listing the juz (capped: "Juz 3, 7 and 2 more"), deduped per student per ISO week (`lib/alerts/revision.ts`).
+- Parents see memorized lines (sabaq only) and the last revision date on `/quran`, and the juz grid (without revision colours) on their child's page.
 
 ### 3.5 Tuition
 - Monthly fee per student; admin toggles each month paid / unpaid. Parents see the current month only.
@@ -82,7 +86,7 @@ Guiding principle: **catch problems early and notify the right person automatica
 - **Modes** (`SMS_MODE` env): `off` (log only, status `dry_run` — the default until Twilio keys exist), `test` (every text goes to `SMS_TEST_NUMBER`, prefixed with the intended recipient), `live`.
 - **Messages page (`/messages`, admin):** texting status, a "send me a test text" button, and the log of every message sent or that would have been sent.
 - Before sending, alerts check `notifications` to avoid duplicates (same recipient + student + trigger in the window, or an explicit `dedupe_key` for batched admin texts).
-- Trigger types: `low_grade`, `absence`, `absence_review`, `tardy_threshold`, `quran_slip`, `payment_overdue`, `admin_digest`, `manual_test`, `special_day`, `absence_report_reply`, `parent_message`, `pace_behind`, `missing_assignments`.
+- Trigger types: `low_grade`, `absence`, `absence_review`, `tardy_threshold`, `quran_slip`, `payment_overdue`, `admin_digest`, `manual_test`, `special_day`, `absence_report_reply`, `parent_message`, `pace_behind`, `missing_assignments`, `revision_overdue`.
 - **Not yet live:** a Twilio number needs to be bought and A2P 10DLC-registered (`docs/SETUP.md` §3).
 
 ### 3.6a Parent-reported absences (incoming texts)
@@ -125,6 +129,7 @@ Thresholds — all read from the single-row `settings` table, never hardcoded:
 | Pace gap threshold | 10 points |
 | Missing assignments threshold | 3 |
 | Stale grade days | 10 school days |
+| Revision overdue | 21 school days (about a month) |
 
 Schedule groups: see §3.3. Seeded with **Full time** (from the school-wide pattern and start time); all existing students were assigned to it.
 
@@ -185,7 +190,8 @@ Full schema in `DATA_MODEL.md` and `supabase/migrations/`:
 | `20261012000100_course_pace.sql` | `grades.percent_complete` / `missing_assignments`; `courses.start_date` / `end_date`; `settings.term_start` / `term_end` / `pace_gap_threshold` / `missing_assignments_threshold`; `pace_behind` and `missing_assignments` notification triggers. Additive; no RLS changes. **Must be applied (`supabase db push`) before this code is deployed.** |
 | `20261013000000_schedule_group_teacher.sql` | `schedule_groups.teacher_id` (responsible teacher, → `profiles`) |
 | `20261014000000_announcements.sql` | `announcements` (admin-only RLS); trigger `announcement` |
-| `20261015000000_stale_grade_setting.sql` | `settings.stale_grade_school_days` (default 10, 1–90). Additive. **Must be applied before this code is deployed.** |
+| `20261015000000_stale_grade_setting.sql` | `settings.stale_grade_school_days` (default 10, 1–90). Additive. |
+| `20261016000000_quran_lesson_types.sql` | `quran_lesson_type` enum; `quran_progress.lesson_type` (default `sabaq`) + `juz`; `student_memorized_juz` (RLS copies `quran_progress`); `settings.revision_overdue_school_days` (default 21); `revision_overdue` trigger. Additive. **Must be applied before this code is deployed.** |
 
 Core tables: `profiles` (role), `students`, `guardians`, `student_guardians`, `courses`, `grades`, `attendance`, `quran_progress`, `payments`, `settings` (single row), `notifications`, the three calendar tables, and `schedule_groups` + `schedule_group_days`.
 
@@ -288,6 +294,7 @@ ControlPad holds **children's educational records and family phone numbers**:
 - Oct 11: staff checklist on the dashboard — responsible teacher per schedule group; today's attendance + Quran gaps per teacher
 - Oct 11: parent-reported absences by text — inbound Twilio webhook, absence reports with admin approval, forwarding of other parent texts, simulator on /messages (§3.6a)
 - Oct 10: special days — more types (schedule change, no GCVS, field trip, other), per-day options (students expected, new times, parent attendance texts on/off), group scope, and a parent text (auto 6pm the evening before and/or "Text parents now")
+- Oct 16: Hifz revision — sabaq / sabaq para / dhor lesson types (only sabaq counts as memorization), memorized-juz grid, revision-overdue texts, "sabaq without revision" flag, dashboard/digest/escalation (§3.4)
 - Oct 15: stale-data flags (staff only) and a "Dropping fastest" grade-trend view, plus dashboard cards and a digest line (§3.2, §3.7)
 - Oct 12: course pace — GCVS % complete and missing assignments on every snapshot, expected-pace calculation from the student's own school days, pace/missing alerts (parents + admin), dashboard and digest items, escalation signals, pace chart and bars (§3.2)
 - Oct 11: weekly grade sweep (`/grades/sweep`) — keyboard-driven bulk update of every active student's current grade per course, with unchanged-skip, draft recovery, and the normal low-grade alert (§3.2)
