@@ -172,6 +172,43 @@ export function evaluateCoursePace(input: {
   };
 }
 
+// ── Shared context ───────────────────────────────────────────────────────────
+
+/** Everything needed to evaluate pace for many courses without more queries. */
+export type PaceContext = {
+  term: TermDates;
+  paceGapThreshold: number;
+  missingAssignmentsThreshold: number;
+  calendar: SchoolCalendarConfig;
+  groups: Map<string, ScheduleGroup>;
+  defaults: DefaultSchedule;
+};
+
+export type LatestPaceSnapshot = {
+  percentComplete: number | null;
+  missingAssignments: number | null;
+};
+
+/** Evaluate one course for a student in `groupId` (null = no schedule group). */
+export function paceForCourse(
+  context: PaceContext,
+  today: string,
+  groupId: string | null,
+  course: CourseDates,
+  latest: LatestPaceSnapshot | null,
+): CoursePaceEvaluation {
+  const group = groupId ? (context.groups.get(groupId) ?? null) : null;
+  return evaluateCoursePace({
+    course,
+    term: context.term,
+    today,
+    isExpectedDay: expectedDayPredicate(group, context.calendar, context.defaults),
+    latest,
+    paceGapThreshold: context.paceGapThreshold,
+    missingAssignmentsThreshold: context.missingAssignmentsThreshold,
+  });
+}
+
 // ── ISO week (alert dedupe keys) ─────────────────────────────────────────────
 
 /** ISO 8601 week as "YYYY-Www" for a YYYY-MM-DD date. */

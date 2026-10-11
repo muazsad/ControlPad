@@ -9,7 +9,9 @@ export type NotificationTrigger =
   | "admin_digest"
   | "absence_review"
   | "manual_test"
-  | "special_day";
+  | "special_day"
+  | "pace_behind"
+  | "missing_assignments";
 
 export type RecipientType = "admin" | "parent";
 

@@ -20,6 +20,10 @@ const validSettings = {
   school_start: "08:00",
   admin_digest_time: "15:00",
   parent_alert_delay_minutes: "60",
+  term_start: "2026-09-01",
+  term_end: "2027-06-10",
+  pace_gap_threshold: "10",
+  missing_assignments_threshold: "3",
 };
 
 describe("parseSettingsForm", () => {
@@ -35,8 +39,34 @@ describe("parseSettingsForm", () => {
         school_start: "08:00",
         admin_digest_time: "15:00",
         parent_alert_delay_minutes: 60,
+        term_start: "2026-09-01",
+        term_end: "2027-06-10",
+        pace_gap_threshold: 10,
+        missing_assignments_threshold: 3,
       },
     });
+  });
+
+  it("allows blank term dates but only as a pair", () => {
+    const blank = parseSettingsForm(form({ ...validSettings, term_start: "", term_end: "" }));
+    assert.equal(blank.ok, true);
+    if (blank.ok) {
+      assert.equal(blank.values.term_start, null);
+      assert.equal(blank.values.term_end, null);
+    }
+    assert.equal(parseSettingsForm(form({ ...validSettings, term_end: "" })).ok, false);
+  });
+
+  it("rejects a term that ends before it starts and bad pace thresholds", () => {
+    assert.equal(
+      parseSettingsForm(form({ ...validSettings, term_end: "2026-08-01" })).ok,
+      false,
+    );
+    assert.equal(parseSettingsForm(form({ ...validSettings, pace_gap_threshold: "0" })).ok, false);
+    assert.equal(
+      parseSettingsForm(form({ ...validSettings, missing_assignments_threshold: "2.5" })).ok,
+      false,
+    );
   });
 
   it("rejects out-of-range numeric values", () => {

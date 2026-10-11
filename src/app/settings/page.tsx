@@ -52,7 +52,7 @@ export default async function SettingsPage() {
   const { data, error } = await supabase
     .from("settings")
     .select(
-      "grade_floor, tardy_window_hours, tardies_per_week, quran_inactivity_days, payment_due_day, school_start, admin_digest_time, parent_alert_delay_minutes, updated_at",
+      "grade_floor, tardy_window_hours, tardies_per_week, quran_inactivity_days, payment_due_day, school_start, admin_digest_time, parent_alert_delay_minutes, term_start, term_end, pace_gap_threshold, missing_assignments_threshold, updated_at",
     )
     .eq("id", 1)
     .single();
