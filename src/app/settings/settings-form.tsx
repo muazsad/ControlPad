@@ -156,6 +156,15 @@ export function SettingsForm({ settings }: Props) {
             hint="Days without a lesson before a Quran slip alert."
           />
           <Field
+            label="Stale grade days"
+            name="stale_grade_school_days"
+            min={1}
+            max={90}
+            step={1}
+            defaultValue={settings.stale_grade_school_days}
+            hint="School days a course can go without a grade update before staff see it as stale. Staff only; parents are not texted."
+          />
+          <Field
             label="Payment due day"
             name="payment_due_day"
             min={1}

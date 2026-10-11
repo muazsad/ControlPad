@@ -25,6 +25,7 @@ type RawGrade = {
 type RawCourse = {
   id: string;
   name: string;
+  created_at: string | null;
   start_date: string | null;
   end_date: string | null;
   grades: RawGrade[];
@@ -50,10 +51,16 @@ type RawStudent = {
 export type CourseSnapshot = {
   courseId: string;
   courseName: string;
+  /** When the course was added; used to judge "never graded". */
+  createdAt: string | null;
   startDate: string | null;
   endDate: string | null;
   latestPercent: number | null;
   latestMissing: number | null;
+  /** ISO time of the latest snapshot, or null if never graded. */
+  latestRecordedAt: string | null;
+  /** Every grade snapshot (for staleness and trends); order not guaranteed. */
+  snapshots: { recordedAt: string; grade: number }[];
 };
 
 export type StudentMetricsRow = {
@@ -116,7 +123,7 @@ export async function getAllStudentMetrics(): Promise<StudentMetricsRow[]> {
     .from("students")
     .select(
       `id, first_name, last_name, grade_level, enrollment_status, schedule_group_id,
-       courses(id, name, start_date, end_date, grades(grade_value, recorded_at, percent_complete, missing_assignments)),
+       courses(id, name, created_at, start_date, end_date, grades(grade_value, recorded_at, percent_complete, missing_assignments)),
        quran_progress(date, lines_memorized),
        attendance(status, date)`,
     )
@@ -158,6 +165,12 @@ export async function getAllStudentMetrics(): Promise<StudentMetricsRow[]> {
         return {
           courseId: course.id,
           courseName: course.name,
+          createdAt: course.created_at,
+          latestRecordedAt: latest?.recorded_at ?? null,
+          snapshots: course.grades.map((grade) => ({
+            recordedAt: grade.recorded_at,
+            grade: Number(grade.grade_value),
+          })),
           startDate: course.start_date,
           endDate: course.end_date,
           latestPercent:

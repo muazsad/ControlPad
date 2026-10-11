@@ -23,6 +23,8 @@ type DataTableProps<T> = {
   getRowKey: (row: T, index: number) => string;
   empty?: ReactNode;
   className?: string;
+  /** Extra classes for a row (e.g. to highlight it). */
+  rowClassName?: (row: T) => string | undefined;
 };
 
 export function DataTable<T>({
@@ -31,6 +33,7 @@ export function DataTable<T>({
   getRowKey,
   empty,
   className,
+  rowClassName,
 }: DataTableProps<T>) {
   if (data.length === 0 && empty) {
     return <>{empty}</>;
@@ -63,7 +66,10 @@ export function DataTable<T>({
             </TableRow>
           ) : (
             data.map((row, rowIndex) => (
-              <TableRow key={getRowKey(row, rowIndex)}>
+              <TableRow
+                key={getRowKey(row, rowIndex)}
+                className={rowClassName?.(row)}
+              >
                 {columns.map((column) => (
                   <TableCell key={column.key} className={column.className}>
                     {column.cell(row)}

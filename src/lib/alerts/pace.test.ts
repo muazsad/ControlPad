@@ -17,6 +17,7 @@ const context: PaceContext = {
   term: { termStart: "2026-10-05", termEnd: "2026-10-18" },
   paceGapThreshold: 10,
   missingAssignmentsThreshold: 3,
+  staleGradeSchoolDays: 10,
   calendar: { weeklyPattern: DEFAULT_WEEKLY_PATTERN, breaks: [], specialDays: [] },
   groups: new Map(),
   defaults: { schoolStart: "08:00", tardyWindowHours: 2 },

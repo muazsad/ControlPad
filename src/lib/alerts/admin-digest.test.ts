@@ -6,6 +6,7 @@ import {
   formatAdminDigestSms,
   sendAdminDigest,
   summarizeGradeIssues,
+  summarizeGradeHealth,
   summarizePaceIssues,
   type AdminDigestDatabase,
   type AdminDailySummary,
@@ -24,6 +25,7 @@ const emptySummary: AdminDailySummary = {
     paymentDueDay: 5,
     paceGapThreshold: 10,
     missingAssignmentsThreshold: 3,
+  staleGradeSchoolDays: 10,
   },
   absences: [],
   tardies: [],
@@ -32,6 +34,8 @@ const emptySummary: AdminDailySummary = {
   droppingGrades: [],
   behindPace: [],
   missingWork: [],
+  staleCourses: [],
+  biggestDrops: [],
   quranSlippage: [],
   overduePayments: [],
 };
@@ -337,6 +341,7 @@ describe("summarizePaceIssues", () => {
     term: { termStart: "2026-10-05", termEnd: "2026-10-18" },
     paceGapThreshold: 10,
     missingAssignmentsThreshold: 3,
+  staleGradeSchoolDays: 10,
     calendar: { weeklyPattern: DEFAULT_WEEKLY_PATTERN, breaks: [], specialDays: [] },
     groups: new Map(),
     defaults: { schoolStart: "08:00", tardyWindowHours: 2 },
@@ -413,5 +418,82 @@ describe("summarizePaceIssues", () => {
       today: "2026-10-12",
     });
     assert.deepEqual(result, { behindPace: [], missingWork: [] });
+  });
+});
+
+describe("summarizeGradeHealth", () => {
+  const context: PaceContext = {
+    term: { termStart: null, termEnd: null },
+    paceGapThreshold: 10,
+    missingAssignmentsThreshold: 3,
+    staleGradeSchoolDays: 5,
+    calendar: { weeklyPattern: DEFAULT_WEEKLY_PATTERN, breaks: [], specialDays: [] },
+    groups: new Map(),
+    defaults: { schoolStart: "08:00", tardyWindowHours: 2 },
+  };
+
+  const gradeRow = (courseId: string, grade: number, recordedAt: string) => ({
+    course_id: courseId,
+    grade_value: grade,
+    recorded_at: recordedAt,
+    courses: null,
+    students: null,
+  });
+
+  it("lists stale and never-graded courses and ranks the biggest drops", () => {
+    const result = summarizeGradeHealth({
+      gradeRows: [
+        gradeRow("alg", 75, "2026-10-19T15:00:00Z"),
+        gradeRow("alg", 90, "2026-10-01T15:00:00Z"),
+        gradeRow("bio", 80, "2026-09-20T15:00:00Z"), // stale
+        gradeRow("his", 70, "2026-10-01T15:00:00Z"),
+        gradeRow("his", 74, "2026-10-19T15:00:00Z"), // rising: not a drop
+      ],
+      students: [
+        {
+          id: "s1",
+          name: "Amina Noor",
+          groupId: null,
+          courses: [
+            { id: "alg", name: "Algebra", created_at: "2026-08-20T12:00:00Z" },
+            { id: "bio", name: "Biology", created_at: "2026-08-20T12:00:00Z" },
+            { id: "art", name: "Art", created_at: "2026-08-20T12:00:00Z" }, // never graded
+          ],
+        },
+        {
+          id: "s2",
+          name: "Bilal Khan",
+          groupId: null,
+          courses: [{ id: "his", name: "History", created_at: "2026-08-20T12:00:00Z" }],
+        },
+      ],
+      context,
+      today: "2026-10-20",
+    });
+
+    assert.deepEqual(
+      result.staleCourses.map((issue) => [issue.courseName, issue.status]).sort(),
+      [
+        ["Art", "never"],
+        ["Biology", "stale"],
+      ],
+    );
+    assert.equal(result.biggestDrops.length, 1);
+    assert.equal(result.biggestDrops[0].studentName, "Amina Noor");
+    assert.equal(result.biggestDrops[0].courseName, "Algebra");
+    assert.equal(result.biggestDrops[0].change, -15);
+    assert.equal(result.biggestDrops[0].tone, "danger");
+  });
+
+  it("adds a stale count line to the digest text", () => {
+    const sms = formatAdminDigestSms({
+      ...emptySummary,
+      staleCourses: [
+        { studentId: "s1", studentName: "Amina", courseId: "bio", courseName: "Biology", status: "stale", schoolDaysSince: 12 },
+        { studentId: "s2", studentName: "Bilal", courseId: "his", courseName: "History", status: "never", schoolDaysSince: 14 },
+      ],
+    });
+    assert.match(sms, /2 courses not updated in 10\+ school days\./);
+    assert.doesNotMatch(formatAdminDigestSms(emptySummary), /not updated/);
   });
 });

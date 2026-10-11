@@ -11,6 +11,7 @@ export type SettingsValues = {
   term_end: string | null;
   pace_gap_threshold: number;
   missing_assignments_threshold: number;
+  stale_grade_school_days: number;
 };
 
 export type SettingsParseResult =
@@ -167,6 +168,15 @@ export function parseSettingsForm(formData: FormData): SettingsParseResult {
     return missingAssignmentsThreshold;
   }
 
+  const staleGradeSchoolDays = integerInRange(
+    formData,
+    "stale_grade_school_days",
+    "Stale grade days",
+    1,
+    90,
+  );
+  if (typeof staleGradeSchoolDays !== "number") return staleGradeSchoolDays;
+
   const termStart = optionalDate(formData, "term_start", "Term start");
   if (termStart !== null && typeof termStart !== "string") return termStart;
   const termEnd = optionalDate(formData, "term_end", "Term end");
@@ -196,6 +206,7 @@ export function parseSettingsForm(formData: FormData): SettingsParseResult {
       term_end: termEnd,
       pace_gap_threshold: paceGapThreshold,
       missing_assignments_threshold: missingAssignmentsThreshold,
+      stale_grade_school_days: staleGradeSchoolDays,
     },
   };
 }

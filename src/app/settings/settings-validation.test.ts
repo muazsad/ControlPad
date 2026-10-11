@@ -24,6 +24,7 @@ const validSettings = {
   term_end: "2027-06-10",
   pace_gap_threshold: "10",
   missing_assignments_threshold: "3",
+  stale_grade_school_days: "10",
 };
 
 describe("parseSettingsForm", () => {
@@ -43,6 +44,7 @@ describe("parseSettingsForm", () => {
         term_end: "2027-06-10",
         pace_gap_threshold: 10,
         missing_assignments_threshold: 3,
+        stale_grade_school_days: 10,
       },
     });
   });
@@ -63,6 +65,7 @@ describe("parseSettingsForm", () => {
       false,
     );
     assert.equal(parseSettingsForm(form({ ...validSettings, pace_gap_threshold: "0" })).ok, false);
+    assert.equal(parseSettingsForm(form({ ...validSettings, stale_grade_school_days: "0" })).ok, false);
     assert.equal(
       parseSettingsForm(form({ ...validSettings, missing_assignments_threshold: "2.5" })).ok,
       false,

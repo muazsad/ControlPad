@@ -112,23 +112,25 @@ export default async function CourseGradesPage({
     { data: gradeData, error: gradesError },
     { data: settingsData },
     paceContext,
-  ] =
-    await Promise.all([
-      supabase
-        .from("courses")
-        .select(
-          "id, name, gcvs_course_code, student_id, start_date, end_date, students(id, first_name, last_name, grade_level, schedule_group_id)",
-        )
-        .eq("id", courseId)
-        .maybeSingle(),
-      supabase
-        .from("grades")
-        .select("id, grade_value, percent_complete, missing_assignments, note, recorded_at")
-        .eq("course_id", courseId)
-        .order("recorded_at", { ascending: false }),
-      supabase.from("settings").select("grade_floor").eq("id", 1).single(),
-      loadPaceContext(),
-    ]);
+  ] = await Promise.all([
+    supabase
+      .from("courses")
+      .select(
+        "id, name, gcvs_course_code, student_id, start_date, end_date, students(id, first_name, last_name, grade_level, schedule_group_id)",
+      )
+      .eq("id", courseId)
+      .maybeSingle(),
+    supabase
+      .from("grades")
+      .select(
+        "id, grade_value, percent_complete, missing_assignments, note, recorded_at",
+      )
+      .eq("course_id", courseId)
+      .order("recorded_at", { ascending: false }),
+    supabase.from("settings").select("grade_floor").eq("id", 1).single(),
+    // Pace is staff-only: parents can't read settings.
+    canManage ? loadPaceContext() : Promise.resolve(null),
+  ]);
 
   if (!course) notFound();
 
@@ -142,34 +144,43 @@ export default async function CourseGradesPage({
   // Pace: latest snapshot vs. where the student should be today.
   const today = easternDateKey(new Date());
   const courseDates = { startDate: c.start_date, endDate: c.end_date };
-  const pace = paceForCourse(
-    paceContext,
-    today,
-    c.students.schedule_group_id,
-    courseDates,
-    latest
-      ? {
-          percentComplete:
-            latest.percent_complete == null ? null : Number(latest.percent_complete),
-          missingAssignments: latest.missing_assignments,
-        }
-      : null,
-  );
-  const chartPoints = buildPacePoints({
-    window: courseWindow(courseDates, paceContext.term),
-    today,
-    isExpectedDay: expectedDayPredicate(
-      c.students.schedule_group_id
-        ? (paceContext.groups.get(c.students.schedule_group_id) ?? null)
+  const pace =
+    paceContext &&
+    paceForCourse(
+      paceContext,
+      today,
+      c.students.schedule_group_id,
+      courseDates,
+      latest
+        ? {
+            percentComplete:
+              latest.percent_complete == null
+                ? null
+                : Number(latest.percent_complete),
+            missingAssignments: latest.missing_assignments,
+          }
         : null,
-      paceContext.calendar,
-      paceContext.defaults,
-    ),
-    snapshots: grades.map((grade) => ({
-      date: easternDateKey(new Date(grade.recorded_at)),
-      percent: grade.percent_complete == null ? null : Number(grade.percent_complete),
-    })),
-  });
+    );
+  const chartPoints = paceContext
+    ? buildPacePoints({
+        window: courseWindow(courseDates, paceContext.term),
+        today,
+        isExpectedDay: expectedDayPredicate(
+          c.students.schedule_group_id
+            ? (paceContext.groups.get(c.students.schedule_group_id) ?? null)
+            : null,
+          paceContext.calendar,
+          paceContext.defaults,
+        ),
+        snapshots: grades.map((grade) => ({
+          date: easternDateKey(new Date(grade.recorded_at)),
+          percent:
+            grade.percent_complete == null
+              ? null
+              : Number(grade.percent_complete),
+        })),
+      })
+    : [];
 
   return (
     <AppShell fullName={profile.fullName} role={profile.role}>
@@ -209,44 +220,49 @@ export default async function CourseGradesPage({
           </Card>
         ) : null}
 
-        <Card className="border shadow-sm">
-          <CardHeader>
-            <CardTitle>Pace</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <PaceBar
-              actual={pace.actual}
-              expected={pace.expected}
-              paceTone={pace.paceTone}
-              missing={pace.missing}
-              missingTone={pace.missingTone}
-            />
-            {pace.window ? (
-              chartPoints.some((point) => point.actual !== undefined) ? (
-                <PaceChart points={chartPoints} />
+        {pace ? (
+          <Card className="border shadow-sm">
+            <CardHeader>
+              <CardTitle>Pace</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <PaceBar
+                actual={pace.actual}
+                expected={pace.expected}
+                paceTone={pace.paceTone}
+                missing={pace.missing}
+                missingTone={pace.missingTone}
+              />
+              {pace.window ? (
+                chartPoints.some((point) => point.actual !== undefined) ? (
+                  <PaceChart points={chartPoints} />
+                ) : (
+                  <p className="text-sm text-muted-foreground">
+                    Record a % complete to chart it against the expected pace.
+                  </p>
+                )
               ) : (
                 <p className="text-sm text-muted-foreground">
-                  Record a % complete to chart it against the expected pace.
+                  No course or term dates are set, so expected pace can&apos;t
+                  be worked out.
+                  {canManage
+                    ? " Set course dates below or the term in Settings."
+                    : ""}
                 </p>
-              )
-            ) : (
-              <p className="text-sm text-muted-foreground">
-                No course or term dates are set, so expected pace can&apos;t be
-                worked out.{canManage ? " Set course dates below or the term in Settings." : ""}
-              </p>
-            )}
-            {canManage ? (
-              <div className="rounded-lg border bg-muted/25 p-4">
-                <p className="mb-3 text-sm font-medium">Course dates</p>
-                <CourseDatesForm
-                  courseId={c.id}
-                  startDate={c.start_date}
-                  endDate={c.end_date}
-                />
-              </div>
-            ) : null}
-          </CardContent>
-        </Card>
+              )}
+              {canManage ? (
+                <div className="rounded-lg border bg-muted/25 p-4">
+                  <p className="mb-3 text-sm font-medium">Course dates</p>
+                  <CourseDatesForm
+                    courseId={c.id}
+                    startDate={c.start_date}
+                    endDate={c.end_date}
+                  />
+                </div>
+              ) : null}
+            </CardContent>
+          </Card>
+        ) : null}
 
         <Card className="border shadow-sm">
           <CardHeader>

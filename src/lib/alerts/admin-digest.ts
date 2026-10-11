@@ -3,7 +3,9 @@ import { sendSms, type SendSmsInput, type SmsResult } from "@/lib/sms/send-sms";
 import { computeOverduePaymentCycles } from "@/lib/alerts/payment-overdue";
 import { evaluateQuranInactivity } from "@/lib/alerts/quran";
 import { bySeverity } from "@/lib/alerts/admin-dashboard-severity";
+import { studentGradeHealth } from "@/lib/grades/grade-health";
 import { paceForCourse, type PaceContext } from "@/lib/grades/pace";
+import { trendTone, TREND_DASHBOARD_TOP_COUNT, type TrendTone } from "@/lib/grades/trend";
 import { getServiceSchoolCalendar } from "@/lib/schedule/calendar-data";
 import {
   dayType,
@@ -35,6 +37,7 @@ export type AdminDigestSettings = {
   paymentDueDay: number;
   paceGapThreshold: number;
   missingAssignmentsThreshold: number;
+  staleGradeSchoolDays: number;
 };
 
 export type AttendanceIssue = {
@@ -103,6 +106,28 @@ export type MissingWorkIssue = {
   tone: "warning" | "danger";
 };
 
+/** A course with no grade update for more than the stale threshold of school days. */
+export type StaleCourseIssue = {
+  studentId: string;
+  studentName: string;
+  courseId: string;
+  courseName: string;
+  status: "stale" | "never";
+  schoolDaysSince: number;
+};
+
+/** A student's worst course change over the trend window (a drop). */
+export type GradeDropIssue = {
+  studentId: string;
+  studentName: string;
+  courseId: string;
+  courseName: string;
+  baseline: number;
+  latest: number;
+  change: number;
+  tone: TrendTone;
+};
+
 export type AdminDailySummary = {
   date: string;
   schoolDayType: CalendarDayType;
@@ -114,6 +139,8 @@ export type AdminDailySummary = {
   droppingGrades: DroppingGradeIssue[];
   behindPace: BehindPaceIssue[];
   missingWork: MissingWorkIssue[];
+  staleCourses: StaleCourseIssue[];
+  biggestDrops: GradeDropIssue[];
   quranSlippage: QuranSlipIssue[];
   overduePayments: OverduePaymentIssue[];
 };
@@ -142,6 +169,7 @@ type StudentRow = {
   last_name: string;
   created_at?: string | null;
   schedule_group_id?: string | null;
+  courses?: { id: string; name: string; created_at: string | null }[];
 };
 
 type AttendanceRow = {
@@ -410,6 +438,89 @@ export function summarizePaceIssues(input: {
   };
 }
 
+/**
+ * Stale/never-graded courses and the biggest grade drops, from the same bulk
+ * grade rows (`gradeRows` holds every snapshot, any order) plus each active
+ * student's course list. Staff-facing only: neither feeds parent texts.
+ */
+export function summarizeGradeHealth(input: {
+  gradeRows: GradeIssueRow[];
+  students: {
+    id: string;
+    name: string;
+    groupId: string | null;
+    courses: { id: string; name: string; created_at: string | null }[];
+  }[];
+  context: PaceContext;
+  today: string;
+}): { staleCourses: StaleCourseIssue[]; biggestDrops: GradeDropIssue[] } {
+  const snapshotsByCourse = new Map<string, { recordedAt: string; grade: number }[]>();
+  for (const row of input.gradeRows) {
+    const list = snapshotsByCourse.get(row.course_id) ?? [];
+    list.push({ recordedAt: row.recorded_at, grade: Number(row.grade_value) });
+    snapshotsByCourse.set(row.course_id, list);
+  }
+
+  const staleCourses: StaleCourseIssue[] = [];
+  const drops: GradeDropIssue[] = [];
+
+  for (const student of input.students) {
+    const health = studentGradeHealth({
+      courses: student.courses.map((course) => {
+        const snapshots = snapshotsByCourse.get(course.id) ?? [];
+        const latest = snapshots.reduce<string | null>(
+          (best, snapshot) =>
+            best === null || snapshot.recordedAt > best ? snapshot.recordedAt : best,
+          null,
+        );
+        return {
+          courseId: course.id,
+          courseName: course.name,
+          createdAt: course.created_at,
+          latestRecordedAt: latest,
+          snapshots,
+        };
+      }),
+      groupId: student.groupId,
+      context: input.context,
+      today: input.today,
+    });
+
+    for (const course of health.staleCourses) {
+      staleCourses.push({
+        studentId: student.id,
+        studentName: student.name,
+        courseId: course.courseId,
+        courseName: course.courseName,
+        status: course.staleness.status === "never" ? "never" : "stale",
+        schoolDaysSince: course.staleness.schoolDaysSince ?? 0,
+      });
+    }
+
+    const worst = health.trend.worst;
+    if (worst && worst.trend.change < 0) {
+      const course = health.courses.find((item) => item.courseName === worst.courseName);
+      drops.push({
+        studentId: student.id,
+        studentName: student.name,
+        courseId: course?.courseId ?? "",
+        courseName: worst.courseName,
+        baseline: worst.trend.baseline,
+        latest: worst.trend.latest,
+        change: worst.trend.change,
+        tone: trendTone(worst.trend.change),
+      });
+    }
+  }
+
+  return {
+    staleCourses: staleCourses.sort((a, b) => b.schoolDaysSince - a.schoolDaysSince),
+    biggestDrops: drops
+      .sort((a, b) => a.change - b.change || a.studentName.localeCompare(b.studentName))
+      .slice(0, TREND_DASHBOARD_TOP_COUNT),
+  };
+}
+
 function namesForDigest(summary: AdminDailySummary) {
   const names = [
     ...summary.absences.map((issue) => issue.studentName),
@@ -433,7 +544,7 @@ export function createSupabaseAdminDigestDatabase(): AdminDigestDatabase {
       const { data: settingsRow, error: settingsError } = await supabase
         .from("settings")
         .select(
-          "admin_digest_time, grade_floor, quran_inactivity_days, payment_due_day, school_start, tardy_window_hours, term_start, term_end, pace_gap_threshold, missing_assignments_threshold",
+          "admin_digest_time, grade_floor, quran_inactivity_days, payment_due_day, school_start, tardy_window_hours, term_start, term_end, pace_gap_threshold, missing_assignments_threshold, stale_grade_school_days",
         )
         .eq("id", 1)
         .single();
@@ -447,6 +558,7 @@ export function createSupabaseAdminDigestDatabase(): AdminDigestDatabase {
         paymentDueDay: Number(settingsRow.payment_due_day),
         paceGapThreshold: Number(settingsRow.pace_gap_threshold),
         missingAssignmentsThreshold: Number(settingsRow.missing_assignments_threshold),
+        staleGradeSchoolDays: Number(settingsRow.stale_grade_school_days),
       };
       const [calendar, groups] = await Promise.all([
         getServiceSchoolCalendar(),
@@ -476,7 +588,9 @@ export function createSupabaseAdminDigestDatabase(): AdminDigestDatabase {
           .order("recorded_at", { ascending: false }),
         supabase
           .from("students")
-          .select("id, first_name, last_name, created_at, schedule_group_id")
+          .select(
+            "id, first_name, last_name, created_at, schedule_group_id, courses(id, name, created_at)",
+          )
           .eq("enrollment_status", "active"),
         supabase
           .from("quran_progress")
@@ -537,26 +651,40 @@ export function createSupabaseAdminDigestDatabase(): AdminDigestDatabase {
         },
       });
 
+      const paceContext: PaceContext = {
+        term: {
+          termStart: settingsRow.term_start ?? null,
+          termEnd: settingsRow.term_end ?? null,
+        },
+        paceGapThreshold: settings.paceGapThreshold,
+        missingAssignmentsThreshold: settings.missingAssignmentsThreshold,
+        staleGradeSchoolDays: settings.staleGradeSchoolDays,
+        calendar,
+        groups: new Map(groups.map((group) => [group.id, group])),
+        defaults: {
+          schoolStart: String(settingsRow.school_start).slice(0, 5),
+          tardyWindowHours: Number(settingsRow.tardy_window_hours),
+        },
+      };
+      const { staleCourses, biggestDrops } = summarizeGradeHealth({
+        gradeRows: (gradesResult.data ?? []) as GradeIssueRow[],
+        students: students.map((student) => ({
+          id: student.id,
+          name: studentName(student),
+          groupId: student.schedule_group_id ?? null,
+          courses: student.courses ?? [],
+        })),
+        context: paceContext,
+        today: date,
+      });
+
       const { behindPace, missingWork } = summarizePaceIssues({
         gradeRows: (gradesResult.data ?? []) as GradeIssueRow[],
         students: students.map((student) => ({
           id: student.id,
           groupId: student.schedule_group_id ?? null,
         })),
-        context: {
-          term: {
-            termStart: settingsRow.term_start ?? null,
-            termEnd: settingsRow.term_end ?? null,
-          },
-          paceGapThreshold: settings.paceGapThreshold,
-          missingAssignmentsThreshold: settings.missingAssignmentsThreshold,
-          calendar,
-          groups: new Map(groups.map((group) => [group.id, group])),
-          defaults: {
-            schoolStart: String(settingsRow.school_start).slice(0, 5),
-            tardyWindowHours: Number(settingsRow.tardy_window_hours),
-          },
-        },
+        context: paceContext,
         today: date,
       });
 
@@ -632,6 +760,8 @@ export function createSupabaseAdminDigestDatabase(): AdminDigestDatabase {
         droppingGrades,
         behindPace,
         missingWork,
+        staleCourses,
+        biggestDrops,
         quranSlippage,
         overduePayments,
       };
@@ -671,13 +801,17 @@ export function formatAdminDigestSms(summary: AdminDailySummary) {
     `Low grades ${summary.lowGrades.length}, Dropping ${summary.droppingGrades.length}, ` +
     `Behind pace ${summary.behindPace.length}, Missing work ${summary.missingWork.length}, ` +
     `Quran ${summary.quranSlippage.length}, Payments ${summary.overduePayments.length}.`;
+  const staleNote =
+    summary.staleCourses.length > 0
+      ? ` ${summary.staleCourses.length} course${summary.staleCourses.length === 1 ? "" : "s"} not updated in ${summary.settings.staleGradeSchoolDays}+ school days.`
+      : "";
   const names = namesForDigest(summary);
   const details =
     names.length > 0
       ? ` Review: ${names.join(", ")}${issueCount(summary) > names.length ? ", and more" : ""}.`
       : " All clear.";
 
-  return `ControlPad daily summary for ${summary.date}:${schoolNote} ${counts}${details}`;
+  return `ControlPad daily summary for ${summary.date}:${schoolNote} ${counts}${staleNote}${details}`;
 }
 
 export async function sendAdminDigest(
