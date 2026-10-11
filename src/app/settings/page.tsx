@@ -11,6 +11,8 @@ import {
   type SpecialDay,
   type WeeklyPattern,
 } from "@/lib/schedule/calendar";
+import { specialDayRecipients } from "@/lib/alerts/special-day";
+import { loadSpecialDayRows, specialDayFromRow } from "@/lib/schedule/calendar-data";
 import { getScheduleGroups } from "@/lib/schedule/schedule-groups-data";
 import { createClient } from "@/lib/supabase/server";
 
@@ -34,12 +36,11 @@ type SchoolBreakRow = {
   end_date: string;
 };
 
-type SpecialDayRow = {
-  date: string;
-  type: "no_school" | "half_day";
-  start_time: string | null;
-  end_time: string | null;
-  note: string | null;
+type ActiveStudentRow = {
+  schedule_group_id: string | null;
+  student_guardians:
+    | { guardians: { phone: string | null } | { phone: string | null }[] | null }[]
+    | null;
 };
 
 export default async function SettingsPage() {
@@ -74,20 +75,18 @@ export default async function SettingsPage() {
       .from("school_breaks")
       .select("id, name, start_date, end_date")
       .order("start_date", { ascending: true }),
-    supabase
-      .from("school_special_days")
-      .select("date, type, start_time, end_time, note")
-      .order("date", { ascending: true }),
+    loadSpecialDayRows(supabase),
     getScheduleGroups(),
     supabase
       .from("students")
-      .select("schedule_group_id")
+      .select("schedule_group_id, student_guardians(guardians(phone))")
       .eq("enrollment_status", "active"),
   ]);
 
   const studentCounts: Record<string, number> = {};
   let ungroupedCount = 0;
-  for (const row of (activeStudents ?? []) as { schedule_group_id: string | null }[]) {
+  const studentRows = (activeStudents ?? []) as ActiveStudentRow[];
+  for (const row of studentRows) {
     if (row.schedule_group_id) {
       studentCounts[row.schedule_group_id] = (studentCounts[row.schedule_group_id] ?? 0) + 1;
     } else {
@@ -105,15 +104,21 @@ export default async function SettingsPage() {
       endDate: schoolBreak.end_date,
     }),
   );
-  const specialDays = ((specialDaysData as SpecialDayRow[] | null) ?? []).map(
-    (specialDay): SpecialDay => ({
-      date: specialDay.date,
-      type: specialDay.type,
-      startTime: specialDay.start_time,
-      endTime: specialDay.end_time,
-      note: specialDay.note,
-    }),
-  );
+  const specialDays: SpecialDay[] = (specialDaysData ?? []).map(specialDayFromRow);
+
+  // How many parent phones "Text parents now" would reach, per special day.
+  const recipientStudents = studentRows.map((row) => ({
+    groupId: row.schedule_group_id,
+    guardians: (row.student_guardians ?? []).flatMap((link) =>
+      Array.isArray(link.guardians) ? link.guardians : link.guardians ? [link.guardians] : [],
+    ),
+  }));
+  const recipientCounts: Record<string, number> = {};
+  for (const day of specialDays) {
+    if (day.parentMessage?.trim()) {
+      recipientCounts[day.date] = specialDayRecipients(day, recipientStudents).length;
+    }
+  }
 
   return (
     <AppShell fullName={profile.fullName} role={profile.role}>
@@ -144,6 +149,8 @@ export default async function SettingsPage() {
               weeklyPattern={weeklyPattern}
               breaks={schoolBreaks}
               specialDays={specialDays}
+              groups={scheduleGroups.map((group) => ({ id: group.id, name: group.name }))}
+              recipientCounts={recipientCounts}
             />
           </div>
         )}

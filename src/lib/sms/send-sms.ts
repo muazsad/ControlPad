@@ -8,7 +8,8 @@ export type NotificationTrigger =
   | "payment_overdue"
   | "admin_digest"
   | "absence_review"
-  | "manual_test";
+  | "manual_test"
+  | "special_day";
 
 export type RecipientType = "admin" | "parent";
 

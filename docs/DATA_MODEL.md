@@ -170,10 +170,17 @@ create table school_breaks (
 -- Date-specific overrides. A special week is represented by one row per date.
 create table school_special_days (
   date        date primary key,
-  type        text not null check (type in ('no_school', 'half_day')),
-  start_time  time,
+  type        text not null check (type in ('no_school', 'half_day', 'schedule_change',
+                                            'no_gcvs', 'field_trip', 'other')),
+  start_time  time,                        -- required for half_day / schedule_change
   end_time    time,
-  note        text,
+  note        text,                        -- staff only
+  students_expected      boolean not null default true,  -- false = nobody in scope expected
+  send_attendance_alerts boolean not null default true,  -- false = no absence/tardy texts to parents
+  applies_to  text[],                      -- null = whole school; else group ids and/or 'ungrouped'
+  parent_message      text,                -- texted to parents of students in scope
+  notify_parents      boolean not null default false,    -- auto-text 6pm the evening before
+  parents_notified_at timestamptz,         -- set when the parent text went out
   created_at  timestamptz not null default now(),
   updated_at  timestamptz not null default now()
 );
@@ -297,9 +304,13 @@ create policy students_parent_read on students
   unmarked/absent are texted.
 - **Quran slip** = days since the latest `quran_progress.date` exceeds `settings.quran_inactivity_days`.
 - **Overdue payment** = no `payments` row with `status='paid'` for the current `period_month` once the day of month passes `settings.payment_due_day`.
-- **School day** = configured weekly pattern minus breaks and `no_school` special days; `half_day`
-  special days count as school days with a half-day type. Grouped students keep their group's
-  times on half days.
+- **School day** = configured weekly pattern minus breaks and whole-school special days that close
+  school (`no_school`, or `students_expected = false`); `half_day` special days count as school
+  days with a half-day type.
+- **Special days** apply to everyone in `applies_to` (null = whole school). For those students:
+  not expected if the day closes school; a `start_time` moves their start (grouped students keep
+  their tardy grace and absence-check offset); `send_attendance_alerts = false` pauses absence and
+  tardy texts to parents (the admin review text still goes out). Logic: `scheduleForDate()`.
 
 ---
 

@@ -46,6 +46,7 @@ const triggerLabels: Record<string, string> = {
   payment_overdue: "Tuition overdue",
   admin_digest: "Daily digest",
   manual_test: "Test",
+  special_day: "Special day",
 };
 
 const statusDisplay: Record<NotificationRow["status"], { label: string; tone: StatusTone }> = {

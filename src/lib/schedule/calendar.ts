@@ -35,7 +35,28 @@ export type SchoolBreak = {
   endDate: string;
 };
 
-export type SpecialDayType = "no_school" | "half_day";
+export const SPECIAL_DAY_TYPES = [
+  "no_school",
+  "half_day",
+  "schedule_change",
+  "no_gcvs",
+  "field_trip",
+  "other",
+] as const;
+
+export type SpecialDayType = (typeof SPECIAL_DAY_TYPES)[number];
+
+export const SPECIAL_DAY_TYPE_LABELS: Record<SpecialDayType, string> = {
+  no_school: "No school",
+  half_day: "Half day",
+  schedule_change: "Schedule change",
+  no_gcvs: "No GCVS",
+  field_trip: "Field trip",
+  other: "Other",
+};
+
+/** Token in `appliesTo` meaning "students without a schedule group". */
+export const UNGROUPED_SCOPE = "ungrouped";
 
 export type SpecialDay = {
   date: string;
@@ -43,7 +64,36 @@ export type SpecialDay = {
   startTime?: string | null;
   endTime?: string | null;
   note?: string | null;
+  /** false = nobody in scope is expected. Defaults: false for no_school, else true. */
+  studentsExpected?: boolean;
+  /** false = absence/tardy texts to parents are paused for students in scope. */
+  sendAttendanceAlerts?: boolean;
+  /** null/undefined = whole school; else group ids and/or UNGROUPED_SCOPE. */
+  appliesTo?: string[] | null;
+  parentMessage?: string | null;
+  notifyParents?: boolean;
+  parentsNotifiedAt?: string | null;
 };
+
+export function isSpecialDayType(value: string): value is SpecialDayType {
+  return (SPECIAL_DAY_TYPES as readonly string[]).includes(value);
+}
+
+/** Whether nobody in scope is expected on this special day. */
+export function specialDayClosesSchool(day: SpecialDay): boolean {
+  return day.type === "no_school" || day.studentsExpected === false;
+}
+
+/** Whether the special day applies to a student in `groupId` (null = ungrouped). */
+export function specialDayAppliesTo(day: SpecialDay, groupId: string | null): boolean {
+  if (!day.appliesTo || day.appliesTo.length === 0) return true;
+  return day.appliesTo.includes(groupId ?? UNGROUPED_SCOPE);
+}
+
+/** Whether the special day covers the whole school (no group scoping). */
+export function specialDayIsSchoolWide(day: SpecialDay): boolean {
+  return !day.appliesTo || day.appliesTo.length === 0;
+}
 
 export type SchoolCalendarConfig = {
   weeklyPattern: WeeklyPattern;
@@ -99,7 +149,9 @@ export function dayType(
   const date = dateOnly(dateValue);
   const specialDay = specialDayFor(date, config);
 
-  if (specialDay?.type === "no_school") return "off";
+  if (specialDay && specialDayIsSchoolWide(specialDay) && specialDayClosesSchool(specialDay)) {
+    return "off";
+  }
   if (isBreakDay(date, config)) return "off";
   if (specialDay?.type === "half_day") return "half";
 
@@ -119,7 +171,7 @@ export function schoolStartForDate(
   standardStartTime: string,
 ): string {
   const specialDay = specialDayForDate(dateValue, config);
-  if (specialDay?.type === "half_day" && specialDay.startTime) {
+  if (specialDay?.startTime && specialDayAppliesTo(specialDay, null)) {
     return specialDay.startTime;
   }
   return standardStartTime;

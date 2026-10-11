@@ -167,7 +167,9 @@ export function studentsAtTardyThreshold(input: {
 
   for (const candidate of input.candidates) {
     const group = candidate.groupId ? groupsById.get(candidate.groupId) ?? null : null;
-    if (!scheduleForDate(input.date, group, input.calendar, input.defaults)) continue;
+    const today = scheduleForDate(input.date, group, input.calendar, input.defaults);
+    // Not expected today, or a special day has paused parent texts.
+    if (!today || !today.parentAlerts) continue;
 
     const window = new Set(
       expectedDatesEnding(

@@ -4,7 +4,9 @@ import { revalidatePath } from "next/cache";
 
 import { requireRole } from "@/lib/auth/current-profile";
 import { createClient } from "@/lib/supabase/server";
-import { WEEKDAY_KEYS, type SpecialDayType } from "@/lib/schedule/calendar";
+import { sendSpecialDayNotice } from "@/lib/alerts/special-day";
+import { WEEKDAY_KEYS } from "@/lib/schedule/calendar";
+import { parseSpecialDayForm } from "@/lib/schedule/special-day-validation";
 
 import {
   parseScheduleGroupForm,
@@ -52,48 +54,12 @@ function requiredText(formData: FormData, key: string, label: string): string {
   return value;
 }
 
-function optionalText(formData: FormData, key: string): string | null {
-  const value = (formData.get(key) as string | null)?.trim() ?? "";
-  return value || null;
-}
-
 function dateValue(formData: FormData, key: string, label: string): string {
   const value = requiredText(formData, key, label);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
     throw new Error(`${label} must use YYYY-MM-DD format.`);
   }
   return value;
-}
-
-function optionalTime(formData: FormData, key: string, label: string): string | null {
-  const value = optionalText(formData, key);
-  if (!value) return null;
-  if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(value)) {
-    throw new Error(`${label} must use HH:MM format.`);
-  }
-  return value;
-}
-
-function specialDayType(formData: FormData): SpecialDayType {
-  const type = requiredText(formData, "type", "Special day type");
-  if (type !== "no_school" && type !== "half_day") {
-    throw new Error("Special day type must be no_school or half_day.");
-  }
-  return type;
-}
-
-function halfDayTimes(formData: FormData, type: SpecialDayType) {
-  const startTime = optionalTime(formData, "start_time", "Start time");
-  const endTime = optionalTime(formData, "end_time", "End time");
-
-  if (type === "half_day" && (!startTime || !endTime)) {
-    throw new Error("Half days need both start and end times.");
-  }
-
-  return {
-    start_time: type === "half_day" ? startTime : null,
-    end_time: type === "half_day" ? endTime : null,
-  };
 }
 
 function assertDateRange(startDate: string, endDate: string) {
@@ -190,60 +156,75 @@ export async function deleteBreak(id: string) {
   revalidatePath("/settings");
 }
 
-export async function upsertSpecialDay(formData: FormData) {
-  await requireRole(["admin"]);
+export type SpecialDayFormState = {
+  error: string | null;
+  success: string | null;
+};
 
-  const date = dateValue(formData, "date", "Date");
-  const type = specialDayType(formData);
-  const times = halfDayTimes(formData, type);
-
-  const supabase = await createClient();
-  const { error } = await supabase.from("school_special_days").upsert(
-    {
-      date,
-      type,
-      ...times,
-      note: optionalText(formData, "note"),
-      updated_at: new Date().toISOString(),
-    },
-    { onConflict: "date" },
-  );
-
-  if (error) throw error;
-
-  revalidatePath("/settings");
+function failure(error: unknown): SpecialDayFormState {
+  return {
+    error: error instanceof Error ? error.message : String(error),
+    success: null,
+  };
 }
 
-export async function updateSpecialDay(originalDate: string, formData: FormData) {
+/**
+ * Creates (originalDate = null) or updates a special day. Editing the parent
+ * message clears parents_notified_at, so the new message can go out again.
+ */
+export async function saveSpecialDay(
+  originalDate: string | null,
+  _prev: SpecialDayFormState,
+  formData: FormData,
+): Promise<SpecialDayFormState> {
   await requireRole(["admin"]);
 
-  const date = dateValue(formData, "date", "Date");
-  const type = specialDayType(formData);
-  const times = halfDayTimes(formData, type);
+  let date: string;
+  try {
+    date = dateValue(formData, "date", "Date");
+  } catch (error) {
+    return failure(error);
+  }
+  const parsed = parseSpecialDayForm(formData);
+  if (!parsed.ok) return { error: parsed.error, success: null };
 
   const supabase = await createClient();
+
+  let parentsNotifiedAt: string | null = null;
+  if (originalDate) {
+    const { data: existing, error: readError } = await supabase
+      .from("school_special_days")
+      .select("parent_message, parents_notified_at")
+      .eq("date", originalDate)
+      .maybeSingle();
+    if (readError) return failure(readError.message);
+    const sameMessage =
+      (existing?.parent_message ?? null) === parsed.values.parent_message;
+    parentsNotifiedAt =
+      sameMessage && date === originalDate ? existing?.parents_notified_at ?? null : null;
+  }
+
   const { error: upsertError } = await supabase.from("school_special_days").upsert(
     {
       date,
-      type,
-      ...times,
-      note: optionalText(formData, "note"),
+      ...parsed.values,
+      parents_notified_at: parentsNotifiedAt,
       updated_at: new Date().toISOString(),
     },
     { onConflict: "date" },
   );
+  if (upsertError) return failure(upsertError.message);
 
-  if (upsertError) throw upsertError;
-
-  if (date !== originalDate) {
+  if (originalDate && date !== originalDate) {
     const { error: deleteError } = await supabase
       .from("school_special_days")
       .delete()
       .eq("date", originalDate);
-    if (deleteError) throw deleteError;
+    if (deleteError) return failure(deleteError.message);
   }
 
   revalidatePath("/settings");
+  return { error: null, success: originalDate ? "Special day saved." : "Special day added." };
 }
 
 export async function deleteSpecialDay(date: string) {
@@ -260,23 +241,31 @@ export async function deleteSpecialDay(date: string) {
   revalidatePath("/settings");
 }
 
-export async function applySpecialDayRange(formData: FormData) {
+/** Applies the same options to every date in a range (no parent message). */
+export async function applySpecialDayRange(
+  _prev: SpecialDayFormState,
+  formData: FormData,
+): Promise<SpecialDayFormState> {
   await requireRole(["admin"]);
 
-  const startDate = dateValue(formData, "start_date", "Start date");
-  const endDate = dateValue(formData, "end_date", "End date");
-  assertDateRange(startDate, endDate);
+  let startDate: string;
+  let endDate: string;
+  try {
+    startDate = dateValue(formData, "start_date", "Start date");
+    endDate = dateValue(formData, "end_date", "End date");
+    assertDateRange(startDate, endDate);
+  } catch (error) {
+    return failure(error);
+  }
 
-  const type = specialDayType(formData);
-  const times = halfDayTimes(formData, type);
-  const note = optionalText(formData, "note");
+  const parsed = parseSpecialDayForm(formData, { allowParentMessage: false });
+  if (!parsed.ok) return { error: parsed.error, success: null };
+
   const updatedAt = new Date().toISOString();
-
   const rows = datesInRange(startDate, endDate).map((date) => ({
     date,
-    type,
-    ...times,
-    note,
+    ...parsed.values,
+    parents_notified_at: null,
     updated_at: updatedAt,
   }));
 
@@ -285,9 +274,41 @@ export async function applySpecialDayRange(formData: FormData) {
     .from("school_special_days")
     .upsert(rows, { onConflict: "date" });
 
-  if (error) throw error;
+  if (error) return failure(error.message);
 
   revalidatePath("/settings");
+  return { error: null, success: `Applied to ${rows.length} day${rows.length === 1 ? "" : "s"}.` };
+}
+
+/** "Text parents now" — sends the saved parent message for `date`. */
+export async function textParentsForSpecialDay(
+  date: string,
+): Promise<SpecialDayFormState> {
+  await requireRole(["admin"]);
+
+  try {
+    const result = await sendSpecialDayNotice({ date });
+    revalidatePath("/settings");
+    revalidatePath("/messages");
+    if (!result.sent) return { error: result.reason, success: null };
+
+    const dryRuns = result.statuses.dry_run ?? 0;
+    const failed = result.statuses.failed ?? 0;
+    const duplicates = result.statuses.duplicate ?? 0;
+    const parts = [
+      dryRuns > 0
+        ? `${dryRuns} logged as dry run (texting is off)`
+        : `${result.statuses.sent ?? 0} sent`,
+      duplicates > 0 ? `${duplicates} already had this message` : null,
+      failed > 0 ? `${failed} failed — see Messages` : null,
+    ].filter(Boolean);
+    return {
+      error: null,
+      success: `${result.recipients} parent${result.recipients === 1 ? "" : "s"}: ${parts.join(", ")}.`,
+    };
+  } catch (error) {
+    return failure(error);
+  }
 }
 
 // ── Schedule groups ─────────────────────────────────────────────────────────

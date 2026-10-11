@@ -1,5 +1,6 @@
 import {
   DEFAULT_WEEKLY_PATTERN,
+  type SpecialDayType,
   type SchoolBreak,
   type SchoolCalendarConfig,
   type SpecialDay,
@@ -18,13 +19,63 @@ type SchoolBreakRow = {
   end_date: string;
 };
 
-type SpecialDayRow = {
+export type SpecialDayRow = {
   date: string;
-  type: "no_school" | "half_day";
+  type: SpecialDayType;
   start_time: string | null;
   end_time: string | null;
   note: string | null;
+  // Added by 20261011000000_special_day_options; absent before it is applied.
+  students_expected?: boolean | null;
+  send_attendance_alerts?: boolean | null;
+  applies_to?: string[] | null;
+  parent_message?: string | null;
+  notify_parents?: boolean | null;
+  parents_notified_at?: string | null;
 };
+
+export const SPECIAL_DAY_COLUMNS =
+  "date, type, start_time, end_time, note, students_expected, send_attendance_alerts, applies_to, parent_message, notify_parents, parents_notified_at";
+const LEGACY_SPECIAL_DAY_COLUMNS = "date, type, start_time, end_time, note";
+
+/** Postgres "undefined column" — the special-day options migration isn't applied yet. */
+function isMissingColumnError(error: SupabaseLikeError | null | undefined) {
+  return error?.code === "42703" || /column .* does not exist/i.test(error?.message ?? "");
+}
+
+export function specialDayFromRow(row: SpecialDayRow): SpecialDay {
+  return {
+    date: row.date,
+    type: row.type,
+    startTime: row.start_time ? row.start_time.slice(0, 5) : null,
+    endTime: row.end_time ? row.end_time.slice(0, 5) : null,
+    note: row.note,
+    studentsExpected: row.students_expected ?? row.type !== "no_school",
+    sendAttendanceAlerts: row.send_attendance_alerts ?? true,
+    appliesTo: row.applies_to ?? null,
+    parentMessage: row.parent_message ?? null,
+    notifyParents: row.notify_parents ?? false,
+    parentsNotifiedAt: row.parents_notified_at ?? null,
+  };
+}
+
+/** Loads special days, falling back to the original columns before the migration. */
+export async function loadSpecialDayRows(
+  supabase: CalendarClient,
+): Promise<{ data: SpecialDayRow[] | null; error: SupabaseLikeError | null }> {
+  const result = await supabase
+    .from("school_special_days")
+    .select(SPECIAL_DAY_COLUMNS)
+    .order("date", { ascending: true });
+  if (!isMissingColumnError(result.error)) {
+    return { data: result.data as SpecialDayRow[] | null, error: result.error };
+  }
+  const legacy = await supabase
+    .from("school_special_days")
+    .select(LEGACY_SPECIAL_DAY_COLUMNS)
+    .order("date", { ascending: true });
+  return { data: legacy.data as SpecialDayRow[] | null, error: legacy.error };
+}
 
 type SupabaseLikeError = {
   code?: string;
@@ -66,10 +117,7 @@ async function loadSchoolCalendar(
       .from("school_breaks")
       .select("id, name, start_date, end_date")
       .order("start_date", { ascending: true }),
-    supabase
-      .from("school_special_days")
-      .select("date, type, start_time, end_time, note")
-      .order("date", { ascending: true }),
+    loadSpecialDayRows(supabase),
   ]);
 
   const errors = [
@@ -101,15 +149,7 @@ async function loadSchoolCalendar(
         endDate: row.end_date,
       }),
     ),
-    specialDays: ((specialDaysResult.data ?? []) as SpecialDayRow[]).map(
-      (row): SpecialDay => ({
-        date: row.date,
-        type: row.type,
-        startTime: row.start_time,
-        endTime: row.end_time,
-        note: row.note,
-      }),
-    ),
+    specialDays: (specialDaysResult.data ?? []).map(specialDayFromRow),
   };
 }
 

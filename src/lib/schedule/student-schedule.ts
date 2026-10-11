@@ -1,8 +1,11 @@
 import {
   dayType,
   schoolStartForDate,
+  specialDayAppliesTo,
+  specialDayClosesSchool,
   specialDayForDate,
   type SchoolCalendarConfig,
+  type SpecialDayType,
 } from "@/lib/schedule/calendar";
 
 // Resolves *when* a given student is expected on a given date, based on their
@@ -42,6 +45,10 @@ export type DaySchedule = {
   tardyCutoffTime: string;
   /** When unmarked/absent students are first flagged to the admin. */
   absenceCheckTime: string;
+  /** false when a special day pauses absence/tardy texts to parents. */
+  parentAlerts: boolean;
+  /** The special day that applies to this student, if any. */
+  specialDay: SpecialDayType | null;
 };
 
 export const WEEKDAY_LABELS = [
@@ -95,11 +102,17 @@ function weekdayOf(date: string): number {
 /**
  * The student's schedule for `date`, or null if they are not expected.
  *
- * - Breaks and "no school" special days apply to everyone.
+ * - Breaks apply to everyone.
+ * - A special day applies to the whole school or only to the groups it lists
+ *   (UNGROUPED_SCOPE = students without a group). When it applies:
+ *   - no_school / studentsExpected=false → not expected;
+ *   - a start time moves the start (tardy grace and absence-check offset are
+ *     kept for grouped students; ungrouped use the tardy window as usual);
+ *   - sendAttendanceAlerts=false pauses absence/tardy texts to parents.
  * - Grouped students attend on their group's weekdays (the school-wide weekly
- *   pattern does not apply to them) and keep their group's times on half days.
+ *   pattern does not apply to them).
  * - Students without a group use the school-wide weekly pattern, school start
- *   (or the half-day start) and tardy window, with no tardy grace.
+ *   and tardy window, with no tardy grace.
  */
 export function scheduleForDate(
   date: string,
@@ -107,8 +120,6 @@ export function scheduleForDate(
   calendar: SchoolCalendarConfig,
   defaults: DefaultSchedule,
 ): DaySchedule | null {
-  const special = specialDayForDate(date, calendar);
-  if (special?.type === "no_school") return null;
   const isBreak = calendar.breaks.some(
     (schoolBreak) =>
       date >= schoolBreak.startDate.slice(0, 10) &&
@@ -116,20 +127,32 @@ export function scheduleForDate(
   );
   if (isBreak) return null;
 
+  const found = specialDayForDate(date, calendar);
+  const special = found && specialDayAppliesTo(found, group?.id ?? null) ? found : null;
+  if (special && specialDayClosesSchool(special)) return null;
+  const parentAlerts = special ? special.sendAttendanceAlerts !== false : true;
+  const specialType = special?.type ?? null;
+
   if (group) {
     const day = group.days.find((item) => item.weekday === weekdayOf(date));
     if (!day) return null;
-    const startTime = normalizeTime(day.startTime);
+    const groupStart = normalizeTime(day.startTime);
+    const startTime = special?.startTime ? normalizeTime(special.startTime) : groupStart;
+    const shift = timeToMinutes(startTime) - timeToMinutes(groupStart);
     return {
       source: "group",
       groupId: group.id,
       groupName: group.name,
       startTime,
       tardyCutoffTime: addMinutesToTime(startTime, day.tardyGraceMinutes),
-      absenceCheckTime: normalizeTime(day.absenceCheckTime),
+      absenceCheckTime: addMinutesToTime(normalizeTime(day.absenceCheckTime), shift),
+      parentAlerts,
+      specialDay: specialType,
     };
   }
 
+  // Ungrouped: the school-wide calendar decides. (A group-scoped closure that
+  // doesn't include ungrouped students doesn't make the day "off".)
   if (dayType(date, calendar) === "off") return null;
   const startTime = normalizeTime(
     schoolStartForDate(date, calendar, defaults.schoolStart),
@@ -144,6 +167,8 @@ export function scheduleForDate(
       startTime,
       defaults.tardyWindowHours * 60,
     ),
+    parentAlerts,
+    specialDay: specialType,
   };
 }
 

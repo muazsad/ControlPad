@@ -3,7 +3,11 @@ import { sendSms, type SendSmsInput, type SmsResult } from "@/lib/sms/send-sms";
 import { sendAdminDigest } from "@/lib/alerts/admin-digest";
 import { checkTardyThresholdAlerts } from "@/lib/alerts/attendance";
 import { checkQuranSlipAlerts } from "@/lib/alerts/quran";
-import type { SchoolCalendarConfig } from "@/lib/schedule/calendar";
+import {
+  sendSpecialDayNotice,
+  shouldAutoSendSpecialDayNotice,
+} from "@/lib/alerts/special-day";
+import { specialDayForDate, type SchoolCalendarConfig } from "@/lib/schedule/calendar";
 import { getServiceSchoolCalendar } from "@/lib/schedule/calendar-data";
 import { getServiceScheduleGroups } from "@/lib/schedule/schedule-groups-data";
 import {
@@ -77,7 +81,8 @@ export type AdminBatch = {
   key: string;
   label: string;
   absenceCheckTime: string;
-  parentAlertTime: string;
+  /** null when a special day pauses parent texts for this batch. */
+  parentAlertTime: string | null;
   students: FlaggedStudent[];
 };
 
@@ -160,7 +165,9 @@ export function planAttendanceEscalation(input: {
 
     const checkMinutes = timeToMinutes(schedule.absenceCheckTime);
     const parentMinutes = checkMinutes + input.settings.parentAlertDelayMinutes;
-    lastParentAlertMinutes = Math.max(lastParentAlertMinutes ?? 0, parentMinutes);
+    if (schedule.parentAlerts) {
+      lastParentAlertMinutes = Math.max(lastParentAlertMinutes ?? 0, parentMinutes);
+    }
 
     if (student.status !== null && student.status !== "absent") continue;
     if (input.nowMinutes < checkMinutes) continue;
@@ -171,23 +178,26 @@ export function planAttendanceEscalation(input: {
       state: student.status === "absent" ? "absent" : "unmarked",
     };
 
-    const key = schedule.groupId ?? "default";
+    // Separate batch when parent texts are paused, so the admin text says so.
+    const key = `${schedule.groupId ?? "default"}${schedule.parentAlerts ? "" : ":no-parent-texts"}`;
     const batch =
       batches.get(key) ??
       ({
         key,
         label: schedule.groupName ?? "School-default",
         absenceCheckTime: schedule.absenceCheckTime,
-        parentAlertTime: addMinutesToTime(
-          schedule.absenceCheckTime,
-          input.settings.parentAlertDelayMinutes,
-        ),
+        parentAlertTime: schedule.parentAlerts
+          ? addMinutesToTime(
+              schedule.absenceCheckTime,
+              input.settings.parentAlertDelayMinutes,
+            )
+          : null,
         students: [],
       } satisfies AdminBatch);
     batch.students.push(flagged);
     batches.set(key, batch);
 
-    if (input.nowMinutes >= parentMinutes) {
+    if (schedule.parentAlerts && input.nowMinutes >= parentMinutes) {
       parentAlerts.push({ ...flagged, guardians: student.guardians });
     }
   }
@@ -210,7 +220,9 @@ export function adminReviewMessage(batch: AdminBatch, date: string): string {
   return (
     `ControlPad ${friendlyDate(date)}: ${count} ${batch.label} student${count === 1 ? "" : "s"} ` +
     `not checked in by ${formatTime12h(batch.absenceCheckTime)}: ${names}. ` +
-    `Parents will be texted at ${formatTime12h(batch.parentAlertTime)} unless attendance is updated.`
+    (batch.parentAlertTime
+      ? `Parents will be texted at ${formatTime12h(batch.parentAlertTime)} unless attendance is updated.`
+      : `Parent texts are paused today (special day).`)
   );
 }
 
@@ -357,6 +369,7 @@ export type AttendanceTickResult = {
   sent: Record<string, number>;
   tardyCheck: { ran: boolean; messages: number };
   quranCheck: { ran: boolean; messages: number };
+  specialDayNotice: { date: string; recipients: number } | null;
   digest: { ran: boolean; sent: boolean; skippedReason: string | null };
 };
 
@@ -367,6 +380,7 @@ export async function runAttendanceTick(
     sendSms?: (input: SendSmsInput) => Promise<SmsResult>;
     checkTardies?: (date: string) => Promise<{ messages: number }>;
     checkQuran?: (date: string) => Promise<{ messages: number }>;
+    sendSpecialDayNotice?: (date: string, now: Date) => Promise<{ recipients: number }>;
     sendDigest?: (
       date: string,
       now: Date,
@@ -378,6 +392,9 @@ export async function runAttendanceTick(
   const checkTardies =
     deps.checkTardies ?? ((date: string) => checkTardyThresholdAlerts({ date }));
   const checkQuran = deps.checkQuran ?? ((date: string) => checkQuranSlipAlerts(date));
+  const sendNotice =
+    deps.sendSpecialDayNotice ??
+    ((date: string, now: Date) => sendSpecialDayNotice({ date, now }));
   const sendDigest =
     deps.sendDigest ?? ((date: string, now: Date) => sendAdminDigest({ date, now }));
 
@@ -428,6 +445,22 @@ export async function runAttendanceTick(
     quranCheck = { ran: true, messages: result.messages };
   }
 
+  // Evening-before parent text for tomorrow's special day (if turned on).
+  let specialDayNotice: AttendanceTickResult["specialDayNotice"] = null;
+  const tomorrowDate = new Date(`${date}T00:00:00.000Z`);
+  tomorrowDate.setUTCDate(tomorrowDate.getUTCDate() + 1);
+  const tomorrow = tomorrowDate.toISOString().slice(0, 10);
+  if (
+    shouldAutoSendSpecialDayNotice({
+      day: specialDayForDate(tomorrow, calendar),
+      today: date,
+      nowMinutes,
+    })
+  ) {
+    const result = await sendNotice(tomorrow, input.now);
+    specialDayNotice = { date: tomorrow, recipients: result.recipients };
+  }
+
   // Daily admin digest at settings.admin_digest_time (local), year-round.
   let digest: AttendanceTickResult["digest"] = {
     ran: false,
@@ -458,6 +491,7 @@ export async function runAttendanceTick(
     sent,
     tardyCheck,
     quranCheck,
+    specialDayNotice,
     digest,
   };
 }

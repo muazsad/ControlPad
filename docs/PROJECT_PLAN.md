@@ -105,7 +105,7 @@ Schedule groups: see §3.3. Seeded with **Full time** (from the school-wide patt
 School calendar:
 - **Weekly pattern**: default Mon, Tue, Wed, Thu, **Sat** on; **Fri and Sun off**. Applies to ungrouped students and to the Quran/digest checks.
 - **Breaks**: named no-school date ranges.
-- **Special days**: date-specific `no_school` or `half_day` (with times + note). Special weeks = bulk-applying special days across a range.
+- **Special days**: date-specific overrides — no school, half day, schedule change, no GCVS, field trip, other. Each day can apply to the whole school or chosen schedule groups, sets whether students are expected, an optional new start/end time, and whether parents get absence/tardy texts. Optional parent text: sent automatically at 6pm the evening before and/or with "Text parents now" (Settings → Special days). Special weeks = applying the same options across a range (no parent text).
 - The app degrades gracefully if the calendar tables are missing.
 
 ### 3.9 Performance metrics
@@ -135,7 +135,7 @@ School calendar:
 
 | Route | Runs from | Schedule | Notes |
 |---|---|---|---|
-| `/api/cron/attendance-tick` | Supabase pg_cron | every 10 min, 10:00–23:50 UTC | Absence escalation + tardy check (per student's own schedule), the daily Quran check at 11:00 Eastern (`QURAN_CHECK_TIME`), and the daily admin digest at `admin_digest_time` Eastern. Needs Vault secrets (SETUP §5). |
+| `/api/cron/attendance-tick` | Supabase pg_cron | every 10 min, 10:00–23:50 UTC | Absence escalation + tardy check (per student's own schedule), the daily Quran check at 11:00 Eastern (`QURAN_CHECK_TIME`), tomorrow's special-day parent text at 6:00 PM Eastern (`SPECIAL_DAY_NOTICE_TIME`), and the daily admin digest at `admin_digest_time` Eastern. Needs Vault secrets (SETUP §5). |
 | `/api/cron/payment-overdue` | Vercel | daily 15:30 UTC | Only acts after `payment_due_day`. |
 | `/api/cron/tardy-threshold`, `/api/cron/quran-slip`, `/api/cron/admin-digest` | manual only | — | Run by attendance-tick now; kept for manual runs (`?force=1` on the digest). |
 
@@ -154,6 +154,7 @@ Full schema in `DATA_MODEL.md` and `supabase/migrations/`:
 | `20260701000000_add_school_calendar.sql` | `school_weekly_patterns`, `school_breaks`, `school_special_days` (admin write, all roles read) |
 | `20261010000000_schedule_groups.sql` | `schedule_groups`, `schedule_group_days`; `students.schedule_group_id`, `attendance.arrived_at`, `settings.parent_alert_delay_minutes`, `notifications.dedupe_key/delivery_mode`; new enum values; seeds **Full time** and assigns all students |
 | `20261010000100_attendance_tick_scheduler.sql` | Enables `pg_cron` + `pg_net`; schedules the 10-minute attendance tick (reads URL + secret from Vault) |
+| `20261011000000_special_day_options.sql` | More special-day types; `students_expected`, `send_attendance_alerts`, `applies_to`, `parent_message`, `notify_parents`, `parents_notified_at`; `special_day` notification trigger. Existing half days scoped to ungrouped students (unchanged behavior) |
 
 Core tables: `profiles` (role), `students`, `guardians`, `student_guardians`, `courses`, `grades`, `attendance`, `quran_progress`, `payments`, `settings` (single row), `notifications`, the three calendar tables, and `schedule_groups` + `schedule_group_days`.
 
@@ -254,17 +255,17 @@ ControlPad holds **children's educational records and family phone numbers**:
 
 **Still to do:**
 1. **Twilio**: buy a number and complete A2P 10DLC registration (or toll-free verification), then `SMS_MODE=test` → `live`. Needs the school's legal name + EIN, a live website with privacy policy and terms pages, a non-Gmail contact email, and a parent opt-in (consent) line on enrollment. Details in `docs/SETUP.md` §3.
-2. ~~**Dedupe should ignore dry runs** (and failed sends)~~ — done Oct 10: when texting is on, only `queued`/`sent` rows count as duplicates, so dry runs and failed sends no longer block a real alert. While texting is off, dry runs still dedupe against each other so `/messages` isn't flooded. See `DEDUPE_STATUSES_*` in `lib/sms/send-sms.ts`.
-3. **Delete seed/test students** and their fake guardian phones before going live.
-4. **Create the real *Quran only* group** (days, start time, tardy grace, absence-check time) and assign students (Settings → Schedule groups; Students → Edit).
-5. Rotate the Supabase service-role key (it was shared in chat) before real student data goes in; update `.env.local` and Vercel.
+2. **Apply the special-days migration**: `supabase db push` (adds `20261011000000_special_day_options.sql`). Until it's applied, Settings → Special days can't save the new options.
+3. ~~**Dedupe should ignore dry runs** (and failed sends)~~ — done Oct 10. See `decideDedupe()` in `lib/sms/send-sms.ts`: only `queued`/`sent` rows *from the same SMS mode* block a repeat (test-mode texts don't block live ones); dry runs only block other dry runs while texting is off; failed sends are retried up to `MAX_FAILED_SEND_ATTEMPTS` (3) per dedupe window.
+4. **Delete seed/test students** and their fake guardian phones before going live.
+5. **Create the real *Quran only* group** (days, start time, tardy grace, absence-check time) and assign students (Settings → Schedule groups; Students → Edit).
+6. Rotate the Supabase service-role key (it was shared in chat) before real student data goes in; update `.env.local` and Vercel.
 
 **Open questions / known limits:**
-- Half days: grouped students keep their normal times. Confirm whether afternoon groups (e.g. Quran only) should be off on half days.
-- The weekly tardy count uses the school-wide calendar's last 7 school days, so tardies on days only a group attends (e.g. a Quran-only Friday) aren't counted.
-- The daily Quran check (Vercel) runs at a fixed UTC time, so it shifts an hour between summer and winter. The digest no longer has this problem (it's triggered by the 10-minute tick).
 - The digest is skipped on no-school days.
-- The dashboard doesn't yet show "unmarked" students; the Attendance page and admin text do.
+- One special day per date (the table is keyed on date), so two different group-scoped events on the same date can't both be set.
+- The payment-overdue job is still a fixed-UTC Vercel cron (shifts an hour with daylight saving); harmless for a once-a-day reminder.
+- Resolved Oct 10: half days / afternoon groups → per-day special-day options; tardy count now uses each student's own last 7 expected days; Quran check runs from the tick at 11:00 Eastern year-round; dashboard and digest show students not checked in.
 
 **Later:**
 - Stripe online tuition payments

@@ -14,40 +14,31 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
   DEFAULT_WEEKLY_PATTERN,
   WEEKDAY_KEYS,
   dayType,
   type SchoolBreak,
   type SchoolCalendarConfig,
   type SpecialDay,
-  type SpecialDayType,
   type WeekdayKey,
   type WeeklyPattern,
 } from "@/lib/schedule/calendar";
 import { cn } from "@/lib/utils";
 
 import {
-  applySpecialDayRange,
   createBreak,
   deleteBreak,
-  deleteSpecialDay,
   updateBreak,
-  updateSpecialDay,
   updateWeeklyPattern,
-  upsertSpecialDay,
 } from "./actions";
+import { SpecialDaysForm } from "./special-days-form";
 
 type Props = {
   weeklyPattern: WeeklyPattern;
   breaks: SchoolBreak[];
   specialDays: SpecialDay[];
+  groups: { id: string; name: string }[];
+  recipientCounts: Record<string, number>;
 };
 
 const weekdayLabels: Record<WeekdayKey, string> = {
@@ -92,26 +83,6 @@ function monthPreviewDays(config: SchoolCalendarConfig) {
   };
 }
 
-function SpecialTypeSelect({
-  name = "type",
-  defaultValue,
-}: {
-  name?: string;
-  defaultValue: SpecialDayType;
-}) {
-  return (
-    <Select name={name} defaultValue={defaultValue}>
-      <SelectTrigger className="h-10">
-        <SelectValue />
-      </SelectTrigger>
-      <SelectContent>
-        <SelectItem value="no_school">No school</SelectItem>
-        <SelectItem value="half_day">Half day</SelectItem>
-      </SelectContent>
-    </Select>
-  );
-}
-
 function IconSubmitButton({
   label,
   icon,
@@ -131,7 +102,13 @@ function IconSubmitButton({
   );
 }
 
-export function ScheduleForm({ weeklyPattern, breaks, specialDays }: Props) {
+export function ScheduleForm({
+  weeklyPattern,
+  breaks,
+  specialDays,
+  groups,
+  recipientCounts,
+}: Props) {
   const calendarConfig: SchoolCalendarConfig = {
     weeklyPattern,
     breaks,
@@ -258,111 +235,11 @@ export function ScheduleForm({ weeklyPattern, breaks, specialDays }: Props) {
             </CardContent>
           </Card>
 
-          <Card className="border shadow-sm">
-            <CardHeader>
-              <CardTitle>Special days</CardTitle>
-              <CardDescription>
-                Override individual dates, or apply the same override across a range.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-5">
-              <form
-                action={upsertSpecialDay}
-                className="grid gap-3 lg:grid-cols-[10rem_11rem_8rem_8rem_1fr_auto]"
-              >
-                <div className="space-y-2">
-                  <Label htmlFor="special-date">Date</Label>
-                  <Input id="special-date" name="date" type="date" required />
-                </div>
-                <div className="space-y-2">
-                  <Label>Type</Label>
-                  <SpecialTypeSelect defaultValue="no_school" />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="special-start">Start</Label>
-                  <Input id="special-start" name="start_time" type="time" />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="special-end">End</Label>
-                  <Input id="special-end" name="end_time" type="time" />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="special-note">Note</Label>
-                  <Input id="special-note" name="note" />
-                </div>
-                <div className="flex items-end">
-                  <IconSubmitButton label="Add" icon="save" />
-                </div>
-              </form>
-
-              <form
-                action={applySpecialDayRange}
-                className="rounded-lg border bg-muted/25 p-3"
-              >
-                <div className="grid gap-3 lg:grid-cols-[10rem_10rem_11rem_8rem_8rem_1fr_auto]">
-                  <Input aria-label="Range start date" name="start_date" type="date" required />
-                  <Input aria-label="Range end date" name="end_date" type="date" required />
-                  <SpecialTypeSelect defaultValue="half_day" />
-                  <Input aria-label="Range start time" name="start_time" type="time" />
-                  <Input aria-label="Range end time" name="end_time" type="time" />
-                  <Input aria-label="Range note" name="note" placeholder="Special week note" />
-                  <IconSubmitButton label="Apply range" icon="save" />
-                </div>
-              </form>
-
-              <div className="space-y-3">
-                {specialDays.length === 0 ? (
-                  <p className="rounded-lg border border-dashed px-3 py-4 text-sm text-muted-foreground">
-                    No special days configured.
-                  </p>
-                ) : (
-                  specialDays.map((specialDay) => {
-                    const updateAction = updateSpecialDay.bind(null, specialDay.date);
-                    const deleteAction = deleteSpecialDay.bind(null, specialDay.date);
-
-                    return (
-                      <div key={specialDay.date} className="rounded-lg border p-3">
-                        <form
-                          action={updateAction}
-                          className="grid gap-3 lg:grid-cols-[10rem_11rem_8rem_8rem_1fr_auto]"
-                        >
-                          <Input
-                            aria-label="Special date"
-                            name="date"
-                            type="date"
-                            defaultValue={specialDay.date}
-                            required
-                          />
-                          <SpecialTypeSelect defaultValue={specialDay.type} />
-                          <Input
-                            aria-label="Special start time"
-                            name="start_time"
-                            type="time"
-                            defaultValue={specialDay.startTime ?? ""}
-                          />
-                          <Input
-                            aria-label="Special end time"
-                            name="end_time"
-                            type="time"
-                            defaultValue={specialDay.endTime ?? ""}
-                          />
-                          <Input
-                            aria-label="Special note"
-                            name="note"
-                            defaultValue={specialDay.note ?? ""}
-                          />
-                          <IconSubmitButton label="Save" icon="save" variant="outline" />
-                        </form>
-                        <form action={deleteAction} className="mt-2 flex justify-end">
-                          <IconSubmitButton label="Remove" icon="delete" variant="outline" />
-                        </form>
-                      </div>
-                    );
-                  })
-                )}
-              </div>
-            </CardContent>
-          </Card>
+          <SpecialDaysForm
+            specialDays={specialDays}
+            groups={groups}
+            recipientCounts={recipientCounts}
+          />
         </div>
 
         <Card className="border shadow-sm">

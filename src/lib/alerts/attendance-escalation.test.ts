@@ -207,6 +207,29 @@ describe("schoolClock", () => {
   });
 });
 
+describe("planAttendanceEscalation on special days", () => {
+  it("still flags to the admin but skips parent texts when alerts are paused", () => {
+    // 2026-10-12 is a Monday
+    const plan = planAttendanceEscalation({
+      date: "2026-10-12",
+      nowMinutes: 12 * 60,
+      students: [student("a1", "full", null)],
+      groups,
+      calendar: {
+        ...calendar,
+        specialDays: [
+          { date: "2026-10-12", type: "field_trip", sendAttendanceAlerts: false },
+        ],
+      },
+      settings,
+    });
+    assert.equal(plan.parentAlerts.length, 0);
+    assert.equal(plan.adminBatches.length, 1);
+    assert.equal(plan.adminBatches[0].parentAlertTime, null);
+    assert.equal(plan.lastParentAlertMinutes, null);
+  });
+});
+
 describe("runAttendanceTick", () => {
   class FakeDb implements EscalationDatabase {
     async getSettings() {
@@ -328,5 +351,41 @@ describe("runAttendanceTick", () => {
     // 10:05 EST — too early
     await runAttendanceTick({ now: new Date("2026-12-15T15:05:00Z") }, deps);
     assert.deepEqual(calls, ["2026-10-12", "2026-12-14"]);
+  });
+
+  it("sends tomorrow's special-day parent text at 6pm the evening before", async () => {
+    class SpecialDb extends FakeDb {
+      async getSchoolCalendar() {
+        return {
+          ...calendar,
+          specialDays: [
+            {
+              date: "2026-10-13",
+              type: "no_gcvs" as const,
+              parentMessage: "No GCVS tomorrow.",
+              notifyParents: true,
+            },
+          ],
+        };
+      }
+    }
+    const notices: string[] = [];
+    const deps = {
+      database: new SpecialDb(),
+      sendSms: async () => ({ status: "dry_run" as const, notification: {} }),
+      checkTardies: async () => ({ messages: 0 }),
+      checkQuran: async () => ({ messages: 0 }),
+      sendDigest: async () => ({ sent: false }),
+      sendSpecialDayNotice: async (date: string) => {
+        notices.push(date);
+        return { recipients: 3 };
+      },
+    };
+    // 5:50pm EDT — too early
+    await runAttendanceTick({ now: new Date("2026-10-12T21:50:00Z") }, deps);
+    // 6:00pm EDT
+    const result = await runAttendanceTick({ now: new Date("2026-10-12T22:00:00Z") }, deps);
+    assert.deepEqual(notices, ["2026-10-13"]);
+    assert.deepEqual(result.specialDayNotice, { date: "2026-10-13", recipients: 3 });
   });
 });
