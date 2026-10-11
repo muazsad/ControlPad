@@ -77,6 +77,7 @@ const triggerLabels: Record<string, string> = {
   parent_message: "Parent text (forwarded)",
   pace_behind: "Behind pace",
   missing_assignments: "Missing work",
+  revision_overdue: "Revision overdue",
 };
 
 const statusDisplay: Record<NotificationRow["status"], { label: string; tone: StatusTone }> = {

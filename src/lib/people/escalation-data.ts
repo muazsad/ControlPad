@@ -1,3 +1,4 @@
+import { sabaqOnly } from "@/lib/quran/lessons";
 import { createClient } from "@/lib/supabase/server";
 import {
   ESCALATION_WINDOW_DAYS,
@@ -39,6 +40,8 @@ type QuranRow = {
   student_id: string;
   date: string;
   lines_memorized: number | string;
+  lesson_type: string | null;
+  juz: number | null;
 };
 
 type PaymentRow = {
@@ -243,7 +246,7 @@ export async function getEscalationStudents(
       .lte("date", endDate),
     supabase
       .from("quran_progress")
-      .select("student_id, date, lines_memorized")
+      .select("student_id, date, lines_memorized, lesson_type, juz")
       .lte("date", endDate)
       .order("date", { ascending: true }),
     supabase
@@ -339,7 +342,8 @@ export async function getEscalationStudents(
           status: record.status,
         }),
       ),
-      quranProgress: (quranByStudent.get(student.id) ?? []).map((entry) => ({
+      // Only sabaq (new memorization) feeds the Quran signal.
+      quranProgress: sabaqOnly(quranByStudent.get(student.id) ?? []).map((entry) => ({
         date: entry.date,
         lines_memorized: Number(entry.lines_memorized),
       })),

@@ -14,7 +14,8 @@ export type NotificationTrigger =
   | "parent_message"
   | "announcement"
   | "pace_behind"
-  | "missing_assignments";
+  | "missing_assignments"
+  | "revision_overdue";
 
 export type RecipientType = "admin" | "parent";
 

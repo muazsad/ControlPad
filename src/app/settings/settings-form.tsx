@@ -165,6 +165,15 @@ export function SettingsForm({ settings }: Props) {
             hint="School days a course can go without a grade update before staff see it as stale. Staff only; parents are not texted."
           />
           <Field
+            label="Revision overdue"
+            name="revision_overdue_school_days"
+            min={1}
+            max={180}
+            step={1}
+            defaultValue={settings.revision_overdue_school_days}
+            hint="School days a memorized juz can go without sabaq para or dhor before parents and the admin are texted."
+          />
+          <Field
             label="Payment due day"
             name="payment_due_day"
             min={1}

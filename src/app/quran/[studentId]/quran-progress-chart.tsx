@@ -2,7 +2,8 @@
 
 import {
   Area,
-  AreaChart,
+  Bar,
+  ComposedChart,
   CartesianGrid,
   ResponsiveContainer,
   Tooltip,
@@ -12,6 +13,11 @@ import {
 
 import type { QuranProgressPoint } from "@/lib/people/quran-progress";
 
+/** A memorization point, plus how many revision entries were logged that day. */
+export type QuranChartPoint = Pick<QuranProgressPoint, "date" | "cumulativeLines"> & {
+  revisions: number;
+};
+
 function formatDate(value: string) {
   const [, month, day] = value.split("-");
   return `${month}/${day}`;
@@ -20,12 +26,12 @@ function formatDate(value: string) {
 export function QuranProgressChart({
   series,
 }: {
-  series: QuranProgressPoint[];
+  series: QuranChartPoint[];
 }) {
   return (
     <div className="h-72 w-full">
       <ResponsiveContainer width="100%" height="100%">
-        <AreaChart
+        <ComposedChart
           data={series}
           margin={{ top: 12, right: 20, left: 0, bottom: 4 }}
         >
@@ -43,6 +49,7 @@ export function QuranProgressChart({
             axisLine={false}
             tickLine={false}
           />
+          <YAxis yAxisId="revisions" orientation="right" hide allowDecimals={false} domain={[0, (max: number) => Math.max(4, max * 4)]} />
           <YAxis
             tick={{ fontSize: 12, fill: "#64748b" }}
             axisLine={false}
@@ -50,10 +57,11 @@ export function QuranProgressChart({
             width={36}
           />
           <Tooltip
-            formatter={(value, name) => [
-              `${value} lines`,
-              name === "cumulativeLines" ? "Cumulative" : name,
-            ]}
+            formatter={(value, name) =>
+              name === "revisions"
+                ? [`${value} entr${Number(value) === 1 ? "y" : "ies"}`, "Revision (sabaq para / dhor)"]
+                : [`${value} lines`, name === "cumulativeLines" ? "Memorized (sabaq)" : name]
+            }
             labelFormatter={(label) => `Date: ${label}`}
             contentStyle={{
               borderRadius: "8px",
@@ -74,7 +82,15 @@ export function QuranProgressChart({
               fill: "var(--color-accent)",
             }}
           />
-        </AreaChart>
+          <Bar
+            dataKey="revisions"
+            yAxisId="revisions"
+            name="revisions"
+            barSize={6}
+            fill="var(--color-status-success)"
+            fillOpacity={0.6}
+          />
+        </ComposedChart>
       </ResponsiveContainer>
     </div>
   );

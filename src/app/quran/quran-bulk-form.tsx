@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useActionState, useEffect, useRef } from "react";
+import { useActionState, useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { useFormStatus } from "react-dom";
 import { CheckCircle2, BookOpen } from "lucide-react";
 import { toast } from "sonner";
@@ -11,6 +11,7 @@ import { Input } from "@/components/ui/input";
 import { InlineError } from "@/components/controlpad/inline-error";
 import { cn } from "@/lib/utils";
 import { studentName, type Student } from "@/lib/people/people";
+import { parseJuzList } from "@/lib/quran/lessons";
 import { logQuranLessons, type QuranBulkState } from "./actions";
 
 type LatestEntry = {
@@ -38,11 +39,11 @@ function SubmitBar({ saved }: { saved?: number }) {
         </span>
       ) : (
         <span className="text-sm text-muted-foreground">
-          Leave a student&apos;s lines blank to skip them.
+          Blank boxes are skipped. Enter moves to the next box.
         </span>
       )}
       <Button type="submit" disabled={pending} className="h-10 min-w-36">
-        {pending ? "Saving…" : "Log lines"}
+        {pending ? "Saving…" : "Log lessons"}
       </Button>
     </div>
   );
@@ -65,6 +66,9 @@ export function QuranBulkForm({
     { error: null },
   );
   const dateRef = useRef<HTMLInputElement>(null);
+  const formRef = useRef<HTMLFormElement>(null);
+  // Typed dhor juz per student, so they can be shown as chips.
+  const [dhor, setDhor] = useState<Record<string, string>>({});
   const latestMap = new Map(latestEntries.map((e) => [e.student_id, e]));
 
   useEffect(() => {
@@ -75,13 +79,36 @@ export function QuranBulkForm({
       toast.success(
         `${state.saved} entr${state.saved === 1 ? "y" : "ies"} logged for ${state.date}`,
       );
-      // Reset all line fields but keep the date so the moderator can
-      // quickly review what was just entered.
+      // Clear the entry boxes (keep the date) so a second submit can't
+      // log the same lessons twice.
+      const keepDate = dateRef.current?.value;
+      formRef.current?.reset();
+      if (dateRef.current && keepDate) dateRef.current.value = keepDate;
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setDhor({});
     }
   }, [state]);
 
+  // Enter / Shift+Enter move between entry boxes (same flow as the grade sweep).
+  function handleKeyDown(event: KeyboardEvent<HTMLFormElement>) {
+    const target = event.target as HTMLElement;
+    if (event.key !== "Enter" || !target.dataset.nav) return;
+    event.preventDefault();
+    const inputs = Array.from(
+      formRef.current?.querySelectorAll<HTMLInputElement>("input[data-nav]") ?? [],
+    );
+    const index = inputs.indexOf(target as HTMLInputElement);
+    const next = inputs[index + (event.shiftKey ? -1 : 1)];
+    if (next) {
+      next.focus();
+      next.select();
+    } else if (!event.shiftKey) {
+      formRef.current?.querySelector<HTMLButtonElement>("button[type=submit]")?.focus();
+    }
+  }
+
   return (
-    <form action={formAction}>
+    <form ref={formRef} action={formAction} onKeyDown={handleKeyDown}>
       {/* Student ID manifest — keeps the action aware of who's in the list */}
       <input
         type="hidden"
@@ -164,21 +191,56 @@ export function QuranBulkForm({
                 )}
               </div>
 
-              {/* Lines field */}
-              <div className="grid gap-2 sm:grid-cols-[minmax(160px,220px)]">
-                <div className="relative">
+              <input type="hidden" name={`name_${student.id}`} value={studentName(student)} />
+
+              {/* Sabaq | Sabaq para | Dhor */}
+              <div className="grid gap-2 sm:grid-cols-[minmax(120px,160px)_minmax(110px,140px)_minmax(160px,1fr)]">
+                <div className="space-y-1">
+                  <label className="text-xs text-muted-foreground" htmlFor={`lines_${student.id}`}>
+                    Sabaq lines
+                  </label>
                   <Input
+                    id={`lines_${student.id}`}
                     name={`lines_${student.id}`}
-                    placeholder="Lines memorized"
-                    type="number"
-                    min={0}
-                    step="0.5"
-                    className="h-8 pr-10 text-sm"
-                    title="Lines memorized"
+                    data-nav="1"
+                    placeholder="New lines"
+                    inputMode="decimal"
+                    className="h-8 text-sm"
+                    autoComplete="off"
                   />
-                  <span className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">
-                    ln
-                  </span>
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs text-muted-foreground" htmlFor={`para_${student.id}`}>
+                    Sabaq para juz
+                  </label>
+                  <Input
+                    id={`para_${student.id}`}
+                    name={`para_${student.id}`}
+                    data-nav="1"
+                    placeholder="1–30"
+                    inputMode="numeric"
+                    className="h-8 text-sm"
+                    autoComplete="off"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs text-muted-foreground" htmlFor={`dhor_${student.id}`}>
+                    Dhor juz
+                  </label>
+                  <Input
+                    id={`dhor_${student.id}`}
+                    name={`dhor_${student.id}`}
+                    data-nav="1"
+                    placeholder="e.g. 3, 7"
+                    inputMode="numeric"
+                    className="h-8 text-sm"
+                    autoComplete="off"
+                    value={dhor[student.id] ?? ""}
+                    onChange={(event) =>
+                      setDhor((prev) => ({ ...prev, [student.id]: event.target.value }))
+                    }
+                  />
+                  <DhorChips value={dhor[student.id] ?? ""} />
                 </div>
               </div>
             </div>
@@ -188,6 +250,27 @@ export function QuranBulkForm({
 
       <SubmitBar saved={state.saved} />
     </form>
+  );
+}
+
+/** Typed dhor juz shown as chips (or a hint when the text isn't valid yet). */
+function DhorChips({ value }: { value: string }) {
+  if (value.trim() === "") return null;
+  const parsed = parseJuzList(value);
+  if (!parsed.ok) {
+    return <p className="text-xs text-status-danger">{parsed.error}</p>;
+  }
+  return (
+    <div className="flex flex-wrap gap-1">
+      {parsed.juz.map((juz) => (
+        <span
+          key={juz}
+          className="rounded-md border bg-muted px-1.5 py-0.5 text-xs font-medium tabular-nums"
+        >
+          Juz {juz}
+        </span>
+      ))}
+    </div>
   );
 }
 

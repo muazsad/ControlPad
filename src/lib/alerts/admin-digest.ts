@@ -4,6 +4,7 @@ import { computeOverduePaymentCycles } from "@/lib/alerts/payment-overdue";
 import { evaluateQuranInactivity } from "@/lib/alerts/quran";
 import { bySeverity } from "@/lib/alerts/admin-dashboard-severity";
 import { studentGradeHealth } from "@/lib/grades/grade-health";
+import { sabaqOnly } from "@/lib/quran/lessons";
 import { paceForCourse, type PaceContext } from "@/lib/grades/pace";
 import { trendTone, TREND_DASHBOARD_TOP_COUNT, type TrendTone } from "@/lib/grades/trend";
 import { getServiceSchoolCalendar } from "@/lib/schedule/calendar-data";
@@ -198,6 +199,8 @@ export type GradeIssueRow = {
 type QuranRow = {
   student_id: string;
   date: string;
+  lesson_type: string | null;
+  juz: number | null;
 };
 
 type PaymentRow = {
@@ -594,7 +597,7 @@ export function createSupabaseAdminDigestDatabase(): AdminDigestDatabase {
           .eq("enrollment_status", "active"),
         supabase
           .from("quran_progress")
-          .select("student_id, date")
+          .select("student_id, date, lesson_type, juz")
           .order("date", { ascending: false }),
         supabase
           .from("payments")
@@ -689,7 +692,9 @@ export function createSupabaseAdminDigestDatabase(): AdminDigestDatabase {
       });
 
       const latestQuranDate = new Map<string, string>();
-      for (const row of (quranResult.data ?? []) as QuranRow[]) {
+      const quranRows = (quranResult.data ?? []) as QuranRow[];
+      // Slippage = no new memorization: only sabaq counts.
+      for (const row of sabaqOnly(quranRows)) {
         if (!latestQuranDate.has(row.student_id)) {
           latestQuranDate.set(row.student_id, row.date);
         }
