@@ -49,7 +49,8 @@ Guiding principle: **catch problems early and notify the right person automatica
 - Courses are **per student** (mirroring their GCVS courses). Classes can be managed from `/grades` or directly from the student profile.
 - Grades are **append-only snapshots** — history is kept so a downward *trend* can be detected, not just an absolute low.
 - `/grades` is a student list; `/grades/[courseId]` shows a course's history.
-- **Alert (event-based):** when a grade is saved below `settings.grade_floor` → SMS (via `checkLowGradeAlert` in `lib/alerts/grades.ts`).
+- **Weekly grade sweep (`/grades/sweep`, admin + moderator; "Weekly sweep" button on `/grades`):** one keyboard-driven table of every course of every *active* student (grouped by student, A–Z) so one teacher can update all current GCVS grades in ~10 minutes. Columns: Student | Course | Last grade (value + date, or "never") | New grade | status chip. Filters (schedule group, name search, "only not updated in the last 7 days") only hide rows — typed values are kept and hidden rows are still saved. Progress line: "X of Y courses updated in the last 7 days" ("last 7 days" = today + the previous 6 **Eastern** days; it comes from server data and changes only after a save). Keys: Enter/Tab/↓ next, Shift+Enter/Shift+Tab/↑ previous, Esc clears; inputs accept 0–100 with one decimal. One **Save sweep** → `saveGradeSweep()` in `app/grades/actions.ts`, which reloads the courses and each course's latest grade itself, then runs `planSweep()` (`lib/grades/sweep.ts`): blanks dropped, values rounded to 1 decimal, unchanged grades skipped (no duplicate snapshot, so `85` = `85.0`), invalid/unknown courses rejected. The rest go in as one batch insert, then `checkLowGradeAlert` runs per inserted grade (failures never fail the save). Unsaved entries are kept as a `localStorage` draft (per user + Eastern date) and a `beforeunload` warning guards the page. Spec: `docs/superpowers/specs/2026-10-11-weekly-grade-sweep-design.md`.
+- **Alert (event-based):** when a grade is saved below `settings.grade_floor` → SMS (via `checkLowGradeAlert` in `lib/alerts/grades.ts`). Applies to single saves and to every grade inserted by the sweep.
 
 ### 3.3 Attendance & schedule groups
 - **Schedule groups** (e.g. *Full time*, *Quran only*): each student belongs to one. A group sets, per weekday, whether it attends, its **start time**, **tardy grace** (minutes), and **absence check** time. Students without a group use the school-wide weekly pattern + `settings.school_start`. Breaks and no-school days apply to everyone; grouped students keep their own times on half days. Managed in Settings (admin).
@@ -178,6 +179,7 @@ src/
   lib/sms/                send-sms.ts — the only Twilio path
   lib/alerts/             grades, attendance (tardy threshold), attendance-escalation (tick),
                           quran, payment, payment-overdue, admin-digest, admin-dashboard-severity
+  lib/grades/             sweep (pure parse/plan/Eastern-window logic), sweep-data (latest grade per course)
   lib/people/             performance, student-metrics, escalation, quran-progress, people
   lib/schedule/           calendar.ts + student-schedule.ts (pure logic), calendar-data.ts +
                           schedule-groups-data.ts (DB loading), schedule-group-validation.ts
@@ -246,6 +248,7 @@ ControlPad holds **children's educational records and family phone numbers**:
 - Oct 10: tardy threshold counts each student's own last 7 expected days (group-aware); Quran check moved onto the 10-minute tick at 11:00 Eastern
 - Oct 10: dashboard + digest show students not checked in (past their tardy cutoff)
 - Oct 10: special days — more types (schedule change, no GCVS, field trip, other), per-day options (students expected, new times, parent attendance texts on/off), group scope, and a parent text (auto 6pm the evening before and/or "Text parents now")
+- Oct 11: weekly grade sweep (`/grades/sweep`) — keyboard-driven bulk update of every active student's current grade per course, with unchanged-skip, draft recovery, and the normal low-grade alert (§3.2)
 
 ---
 

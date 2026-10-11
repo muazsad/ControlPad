@@ -5,6 +5,9 @@ import { redirect } from "next/navigation";
 
 import { checkLowGradeAlert } from "@/lib/alerts/grades";
 import { requireRole } from "@/lib/auth/current-profile";
+import { MAX_SWEEP_ENTRIES, planSweep, type SweepCourse, type SweepInvalidReason } from "@/lib/grades/sweep";
+import { fetchLatestGrades } from "@/lib/grades/sweep-data";
+import { studentName } from "@/lib/people/people";
 import { createClient } from "@/lib/supabase/server";
 
 export type GradeActionState = { error: string | null };
@@ -99,4 +102,123 @@ export async function recordGrade(
   revalidatePath(`/grades/${courseId}`);
   revalidatePath(`/students/${studentId}`);
   return { error: null };
+}
+
+export type SaveGradeSweepResult = {
+  saved: number;
+  skippedUnchanged: number;
+  invalid: { courseId: string; reason: SweepInvalidReason }[];
+  /** Set when nothing could be saved (bad request or database error). */
+  error?: string;
+};
+
+type SweepStudentRow = {
+  id: string;
+  first_name: string;
+  last_name: string;
+  courses: { id: string; name: string }[];
+};
+
+/**
+ * Save the weekly sweep. The client sends only { courseId, value } pairs; the
+ * courses (and which students are active) and each course's latest grade are
+ * loaded here, so nothing about "last grade" is trusted from the browser.
+ */
+export async function saveGradeSweep(
+  entries: { courseId: string; value: string }[],
+): Promise<SaveGradeSweepResult> {
+  const profile = await requireRole(["admin", "moderator"]);
+  const empty = { saved: 0, skippedUnchanged: 0, invalid: [] };
+
+  if (!Array.isArray(entries) || entries.length > MAX_SWEEP_ENTRIES) {
+    return { ...empty, error: "Invalid sweep request." };
+  }
+
+  const supabase = await createClient();
+
+  const { data: studentRows, error: studentsError } = await supabase
+    .from("students")
+    .select("id, first_name, last_name, courses(id, name)")
+    .eq("enrollment_status", "active");
+  if (studentsError) return { ...empty, error: studentsError.message };
+
+  let latestGrades;
+  try {
+    latestGrades = await fetchLatestGrades(supabase);
+  } catch (error) {
+    return {
+      ...empty,
+      error: error instanceof Error ? error.message : "Could not load grades.",
+    };
+  }
+
+  const courses: SweepCourse[] = [];
+  const labels = new Map<string, { studentName: string; courseName: string }>();
+  for (const student of (studentRows ?? []) as unknown as SweepStudentRow[]) {
+    for (const course of student.courses) {
+      courses.push({
+        id: course.id,
+        studentId: student.id,
+        latestGrade: latestGrades.get(course.id)?.value ?? null,
+      });
+      labels.set(course.id, {
+        studentName: studentName(student),
+        courseName: course.name,
+      });
+    }
+  }
+
+  const plan = planSweep(
+    entries.map((entry) => ({
+      courseId: entry?.courseId,
+      value: entry?.value,
+    })),
+    courses,
+  );
+
+  if (plan.toInsert.length > 0) {
+    const { error } = await supabase.from("grades").insert(
+      plan.toInsert.map((grade) => ({
+        course_id: grade.courseId,
+        student_id: grade.studentId,
+        grade_value: grade.gradeValue,
+        recorded_by: profile.id,
+      })),
+    );
+    if (error) return { ...empty, error: error.message };
+
+    // The grades are already saved; an alert problem must not fail the save.
+    for (const grade of plan.toInsert) {
+      const label = labels.get(grade.courseId);
+      try {
+        await checkLowGradeAlert({
+          studentId: grade.studentId,
+          studentName: label?.studentName ?? "A student",
+          courseName: label?.courseName ?? "a course",
+          gradeValue: grade.gradeValue,
+          includeGuardians: false,
+        });
+      } catch (alertError) {
+        console.error(
+          "Grade sweep: low-grade alert failed",
+          alertError instanceof Error ? alertError.message : "unknown error",
+        );
+      }
+    }
+
+    revalidatePath("/grades");
+    revalidatePath("/grades/sweep");
+    for (const studentId of new Set(plan.toInsert.map((g) => g.studentId))) {
+      revalidatePath(`/students/${studentId}`);
+    }
+    for (const grade of plan.toInsert) {
+      revalidatePath(`/grades/${grade.courseId}`);
+    }
+  }
+
+  return {
+    saved: plan.toInsert.length,
+    skippedUnchanged: plan.skippedUnchanged,
+    invalid: plan.invalid,
+  };
 }

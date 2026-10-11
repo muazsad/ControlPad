@@ -1,11 +1,12 @@
 import Link from "next/link";
-import { AlertTriangle, GraduationCap } from "lucide-react";
+import { AlertTriangle, GraduationCap, ListChecks } from "lucide-react";
 
 import { AppShell } from "@/components/controlpad/app-shell";
 import { DataTable } from "@/components/controlpad/data-table";
 import { EmptyState } from "@/components/controlpad/empty-state";
 import { PageHeader } from "@/components/controlpad/page-header";
 import { StatusBadge } from "@/components/controlpad/status-badge";
+import { Button } from "@/components/ui/button";
 import { getCurrentProfile } from "@/lib/auth/current-profile";
 import { formatGrade, gradeTone } from "./grade-display";
 import { getAllStudentMetrics } from "@/lib/people/student-metrics";
@@ -29,6 +30,16 @@ export default async function GradesPage() {
         <PageHeader
           title="Grades"
           description="Grade averages and performance across all students. Click a student to view full course history."
+          action={
+            profile.role === "admin" || profile.role === "moderator" ? (
+              <Button asChild className="h-10">
+                <Link href="/grades/sweep">
+                  <ListChecks className="size-4" aria-hidden="true" />
+                  Weekly sweep
+                </Link>
+              </Button>
+            ) : undefined
+          }
         />
 
         <DataTable
