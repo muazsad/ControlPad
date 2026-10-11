@@ -68,6 +68,8 @@ function totalIssues(summary: AdminDailySummary) {
     summary.behindPace.length +
     summary.missingWork.length +
     summary.quranSlippage.length +
+    summary.revisionOverdue.length +
+    summary.sabaqWithoutRevision.length +
     summary.overduePayments.length
   );
 }
@@ -117,6 +119,7 @@ function signalLabel(signal: string) {
   if (signal === "quran") return "Quran";
   if (signal === "pace") return "Behind pace";
   if (signal === "missing") return "Missing work";
+  if (signal === "revision") return "Revision overdue";
   return signal.charAt(0).toUpperCase() + signal.slice(1);
 }
 
@@ -180,7 +183,9 @@ function CriticalStudentsSection({
                       <StatusBadge
                         key={key}
                         status={
-                          key === "pace" || key === "missing"
+                          key === "revision"
+                            ? signalLabel(key)
+                            : key === "pace" || key === "missing"
                             ? `${signalLabel(key)} ${signal.occurrences} course${signal.occurrences === 1 ? "" : "s"}`
                             : `${signalLabel(key)} ${signal.occurrences}x / ${signal.durationDays}d`
                         }
@@ -575,6 +580,63 @@ function AdminDashboard({
                 status={`${issue.daysSinceLastLesson} days`}
                 tone="danger"
               />
+            </div>
+          ))}
+        </IssueGroup>
+
+        <IssueGroup
+          title="Revision overdue"
+          href="/quran"
+          empty="Every memorized juz has been revised recently."
+          hasItems={summary.revisionOverdue.length > 0}
+        >
+          {summary.revisionOverdue.map((issue) => (
+            <div
+              key={`revision-${issue.studentId}`}
+              className="flex items-center justify-between gap-3 border-b py-2 last:border-0"
+            >
+              <div>
+                <Link
+                  href={`/quran/${issue.studentId}`}
+                  className="text-sm font-medium hover:underline"
+                >
+                  {issue.studentName}
+                </Link>
+                <p className="text-xs text-muted-foreground">
+                  Juz {issue.juz.join(", ")}
+                </p>
+              </div>
+              <StatusBadge
+                status={`${issue.juz.length} juz`}
+                tone={issue.tone}
+              />
+            </div>
+          ))}
+        </IssueGroup>
+
+        <IssueGroup
+          title="Sabaq without revision"
+          href="/quran"
+          empty="Everyone memorizing new lines is also revising."
+          hasItems={summary.sabaqWithoutRevision.length > 0}
+        >
+          {summary.sabaqWithoutRevision.map((issue) => (
+            <div
+              key={`no-revision-${issue.studentId}`}
+              className="flex items-center justify-between gap-3 border-b py-2 last:border-0"
+            >
+              <div>
+                <Link
+                  href={`/quran/${issue.studentId}`}
+                  className="text-sm font-medium hover:underline"
+                >
+                  {issue.studentName}
+                </Link>
+                <p className="text-xs text-muted-foreground">
+                  {issue.sabaqCount} sabaq lessons, no sabaq para or dhor
+                </p>
+              </div>
+              <StatusBadge status="No revision" tone={issue.tone} />
             </div>
           ))}
         </IssueGroup>

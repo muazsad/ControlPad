@@ -7,6 +7,7 @@ import {
   sendAdminDigest,
   summarizeGradeIssues,
   summarizeGradeHealth,
+  summarizeRevisionIssues,
   summarizePaceIssues,
   type AdminDigestDatabase,
   type AdminDailySummary,
@@ -25,7 +26,8 @@ const emptySummary: AdminDailySummary = {
     paymentDueDay: 5,
     paceGapThreshold: 10,
     missingAssignmentsThreshold: 3,
-  staleGradeSchoolDays: 10,
+    staleGradeSchoolDays: 10,
+    revisionOverdueSchoolDays: 21,
   },
   absences: [],
   tardies: [],
@@ -37,6 +39,8 @@ const emptySummary: AdminDailySummary = {
   staleCourses: [],
   biggestDrops: [],
   quranSlippage: [],
+  revisionOverdue: [],
+  sabaqWithoutRevision: [],
   overduePayments: [],
 };
 
@@ -495,5 +499,50 @@ describe("summarizeGradeHealth", () => {
     });
     assert.match(sms, /2 courses not updated in 10\+ school days\./);
     assert.doesNotMatch(formatAdminDigestSms(emptySummary), /not updated/);
+  });
+});
+
+describe("summarizeRevisionIssues", () => {
+  const calendar = { weeklyPattern: DEFAULT_WEEKLY_PATTERN, breaks: [], specialDays: [] };
+
+  it("lists students with overdue juz and students memorizing without revising", () => {
+    const result = summarizeRevisionIssues({
+      quranRows: [
+        // s1: juz 3 revised recently, juz 7 never revised → overdue
+        { student_id: "s1", date: "2026-10-10", lesson_type: "dhor", juz: 3 },
+        // s2: three sabaq, no revision in the window
+        { student_id: "s2", date: "2026-10-06", lesson_type: "sabaq", juz: null },
+        { student_id: "s2", date: "2026-10-08", lesson_type: "sabaq", juz: null },
+        { student_id: "s2", date: "2026-10-12", lesson_type: "sabaq", juz: null },
+      ],
+      memorizedRows: [
+        { student_id: "s1", juz: 3, marked_at: "2026-09-01" },
+        { student_id: "s1", juz: 7, marked_at: "2026-09-01" },
+      ],
+      students: [
+        { id: "s1", name: "Yusuf Ali" },
+        { id: "s2", name: "Maryam Khan" },
+      ],
+      thresholdSchoolDays: 5,
+      calendar,
+      today: "2026-10-12",
+    });
+    assert.deepEqual(
+      result.revisionOverdue.map((issue) => [issue.studentName, issue.juz]),
+      [["Yusuf Ali", [7]]],
+    );
+    assert.deepEqual(
+      result.sabaqWithoutRevision.map((issue) => [issue.studentName, issue.sabaqCount]),
+      [["Maryam Khan", 3]],
+    );
+  });
+
+  it("adds both counts to the digest text", () => {
+    const sms = formatAdminDigestSms({
+      ...emptySummary,
+      revisionOverdue: [{ studentId: "s1", studentName: "Yusuf", juz: [7], tone: "danger" }],
+    });
+    assert.match(sms, /Revision overdue 1, Sabaq without revision 0/);
+    assert.match(sms, /Review: Yusuf/);
   });
 });
