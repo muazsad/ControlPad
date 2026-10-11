@@ -242,16 +242,22 @@ ControlPad holds **children's educational records and family phone numbers**:
 - Two-stage absence escalation (admin first, then parents) every 10 minutes via Supabase pg_cron
 - SMS modes (off / test / live), Messages page, test text
 - Overdue-tuition SMS scheduled; daily crons run every day (Saturday covered)
+- Oct 10: SMS dedupe fixed (dry runs/failed sends don't block real alerts; test-mode texts don't block live; failed sends retried max 3×)
+- Oct 10: tardy threshold counts each student's own last 7 expected days (group-aware); Quran check moved onto the 10-minute tick at 11:00 Eastern
+- Oct 10: dashboard + digest show students not checked in (past their tardy cutoff)
+- Oct 10: special days — more types (schedule change, no GCVS, field trip, other), per-day options (students expected, new times, parent attendance texts on/off), group scope, and a parent text (auto 6pm the evening before and/or "Text parents now")
 
 ---
 
 ## 10. Known gaps & next up
 
-**Current status (Oct 10, 2026):**
-- Production: <https://control-pad.vercel.app> (Vercel Hobby, deploys from `main`). Schedule groups, arrival-based attendance, the Messages page and the 10-minute attendance tick are live.
-- Database: a **new Supabase project** (the original free project was lost after inactivity). All migrations applied via `supabase db push`; test accounts from `npm run seed`. Free Supabase projects pause after a week of no activity — the 10-minute tick keeps this one active.
+**Current status (Oct 10, 2026, end of day):**
+- Production: <https://control-pad.vercel.app> (Vercel Hobby, deploys from `main`). Schedule groups, arrival-based attendance, the Messages page, the 10-minute attendance tick, and the new special days are live and verified.
+- Code: everything is merged to `main`; `npm test` (115 tests), type check and build pass. No open branches.
+- Database: a **new Supabase project** (the original free project was lost after inactivity). All migrations through `20261011000000_special_day_options.sql` applied via `supabase db push` (CLI is logged in and linked on the owner's Mac); test accounts from `npm run seed`. Free Supabase projects pause after a week of no activity — the 10-minute tick keeps this one active.
 - Vercel env vars set: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `CRON_SECRET`. Supabase Vault secrets `controlpad_app_url` and `controlpad_cron_secret` are set; `/api/cron/attendance-tick` was verified end to end (all messages logged as `dry_run`).
 - **Texting is off** (no Twilio number yet). Everything is logged on `/messages`.
+- **No code work is blocking go-live.** What's left is owner setup (below). Feature ideas are under **Later**.
 
 **Still to do:**
 1. **Twilio**: buy a number and complete A2P 10DLC registration (or toll-free verification), then `SMS_MODE=test` → `live`. Needs the school's legal name + EIN, a live website with privacy policy and terms pages, a non-Gmail contact email, and a parent opt-in (consent) line on enrollment. Details in `docs/SETUP.md` §3.

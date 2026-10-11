@@ -25,7 +25,7 @@ All app code lives under `src/` (import alias `@/` → `src/`). Full map in `doc
 - `src/lib/sms/send-sms.ts` — the single Twilio send module. All SMS go through here and get logged to `notifications`. Honors `SMS_MODE` (off / test / live); never bypass it.
 - `src/lib/alerts/` — threshold-checking logic (grades, attendance, quran, payment, payment-overdue, admin-digest, admin-dashboard-severity).
 - `src/lib/people/` — performance metrics, student metrics, escalation, Quran progress.
-- `src/lib/schedule/` — school calendar + schedule groups. Pure logic in `calendar.ts` and `student-schedule.ts` (`scheduleForDate()` decides when a student is expected; always use it rather than reading `settings.school_start` directly); DB loading in `calendar-data.ts` and `schedule-groups-data.ts`. Time-based alerts must respect the calendar and each student's group.
+- `src/lib/schedule/` — school calendar + schedule groups. Pure logic in `calendar.ts` and `student-schedule.ts` (`scheduleForDate()` decides when a student is expected; always use it rather than reading `settings.school_start` directly); DB loading in `calendar-data.ts` and `schedule-groups-data.ts`. Time-based alerts must respect the calendar and each student's group. Special days can apply to the whole school or chosen groups (`applies_to`), close school, move start times, or pause parent attendance texts (`DaySchedule.parentAlerts`) — all handled inside `scheduleForDate()`; never re-implement special-day checks elsewhere.
 - `src/app/api/cron/` — protected cron endpoints; use `requireCronSecret()` from `_utils.ts`. Daily schedules are in `vercel.json` (UTC; Vercel Hobby = once a day max). Anything more frequent runs from Supabase `pg_cron` (see the `attendance_tick_scheduler` migration).
 - `supabase/migrations/` — all schema changes as migration files.
 - Tests sit next to the code as `*.test.ts` (Node test runner + `tsx`); run with `npm test`.
@@ -44,7 +44,8 @@ All app code lives under `src/` (import alias `@/` → `src/`). Full map in `doc
 - The original 8 build phases are complete; `docs/BUILD_PROMPTS.md` is historical. Check **§10 "Known gaps & next up"** in `docs/PROJECT_PLAN.md` before starting new work.
 - Work in small, focused changes on a branch off `main`. After each change, `npm test` and `npm run build` must pass and the app must stay deployable.
 - **Never hardcode thresholds.** Read them from the `settings` table (grade floor, tardy window, etc.).
-- **Every alert** is checked against `settings`, sent via `lib/sms/`, and written to `notifications`. Before sending, check `notifications` to avoid duplicate alerts for the same student+trigger in the relevant window.
+- **Every alert** is checked against `settings`, sent via `lib/sms/`, and written to `notifications`. `sendSms()` dedupes for you via `decideDedupe()` (same recipient + student + trigger, or a `dedupeKey`, within `dedupeWindowHours`): only sent/queued texts in the current SMS mode block a repeat, dry runs only block other dry runs, failed sends retry up to `MAX_FAILED_SEND_ATTEMPTS`. Pick a sensible window/key; don't add your own dedupe queries.
+- Anything that should run at a local time of day goes on the 10-minute tick (`runAttendanceTick` in `lib/alerts/attendance-escalation.ts`) with a named time constant — not a fixed-UTC Vercel cron, which shifts with daylight saving.
 - Use Supabase **migrations** for schema changes — never tell the user to paste SQL into the dashboard for permanent changes.
 - Write clear, typed code. Validate input. Handle the "no data yet" and "SMS failed" cases.
 - This app holds children's records and family phone numbers. Treat data carefully; don't log full PII to the console.
