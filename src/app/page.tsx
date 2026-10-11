@@ -25,6 +25,9 @@ import {
 } from "@/components/ui/card";
 import { getPendingAbsenceReports } from "@/lib/absence-reports/reports-data";
 import { getCurrentProfile } from "@/lib/auth/current-profile";
+import { getStaffChecklist } from "@/lib/people/staff-accountability-data";
+import type { TeacherChecklist } from "@/lib/people/staff-accountability";
+
 import {
   getAdminDailySummary,
   todayInSchoolTimeZone,
@@ -47,6 +50,8 @@ import type {
   EscalationStudentResult,
 } from "@/lib/people/escalation";
 import { createClient } from "@/lib/supabase/server";
+
+import { StaffChecklistSection } from "./staff-checklist-section";
 
 function dangerIssueTone(count: number) {
   return count > 0 ? ("danger" as const) : ("success" as const);
@@ -188,11 +193,13 @@ function AdminDashboard({
   summary,
   escalations,
   pendingAbsenceReports,
+  staffChecklist,
 }: {
   fullName: string;
   summary: AdminDailySummary;
   escalations: EscalationStudentResult[];
   pendingAbsenceReports: number;
+  staffChecklist: { rows: TeacherChecklist[]; anyTeacherAssigned: boolean } | null;
 }) {
   const gradeIssueCount =
     summary.lowGrades.length + summary.droppingGrades.length;
@@ -327,6 +334,13 @@ function AdminDashboard({
       ) : null}
 
       <CriticalStudentsSection escalations={escalations} />
+
+      {staffChecklist ? (
+        <StaffChecklistSection
+          rows={staffChecklist.rows}
+          anyTeacherAssigned={staffChecklist.anyTeacherAssigned}
+        />
+      ) : null}
 
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
         {cards.map((item) => (
@@ -671,6 +685,7 @@ export default async function HomePage() {
   let adminDailySummary: AdminDailySummary | null = null;
   let adminEscalations: EscalationStudentResult[] = [];
   let pendingAbsenceReports = 0;
+  let staffChecklist: { rows: TeacherChecklist[]; anyTeacherAssigned: boolean } | null = null;
   if (profile.role === "parent") {
     const supabase = await createClient();
     // RLS guarantees this only returns students linked to this parent.
@@ -684,10 +699,12 @@ export default async function HomePage() {
   } else if (profile.role === "admin") {
     const today = todayInSchoolTimeZone();
     let pendingReports: Awaited<ReturnType<typeof getPendingAbsenceReports>>;
-    [adminDailySummary, adminEscalations, pendingReports] = await Promise.all([
+    [adminDailySummary, adminEscalations, pendingReports, staffChecklist] = await Promise.all([
       getAdminDailySummary(today, { now: new Date() }),
       getEscalationStudents(today),
       getPendingAbsenceReports(),
+      // A checklist failure shouldn't take down the dashboard.
+      getStaffChecklist().catch(() => null),
     ]);
     pendingAbsenceReports = pendingReports.length;
   }
@@ -702,6 +719,7 @@ export default async function HomePage() {
           summary={adminDailySummary}
           escalations={adminEscalations}
           pendingAbsenceReports={pendingAbsenceReports}
+          staffChecklist={staffChecklist}
         />
       ) : (
         <StaffDashboard fullName={profile.fullName} role={profile.role} />

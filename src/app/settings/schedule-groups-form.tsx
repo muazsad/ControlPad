@@ -17,6 +17,13 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   WEEKDAY_LABELS,
   type ScheduleGroup,
   type ScheduleGroupDay,
@@ -30,11 +37,20 @@ import {
   type ScheduleGroupFormState,
 } from "./actions";
 
+type StaffOption = { id: string; name: string };
+
 type Props = {
   groups: ScheduleGroup[];
   studentCounts: Record<string, number>;
   ungroupedCount: number;
+  /** Admins and moderators who can be a group's responsible teacher. */
+  staff: StaffOption[];
+  /** group id → teacher id */
+  groupTeachers: Record<string, string>;
 };
+
+/** Select value for "no teacher" (Radix Select items can't use ""). */
+const NO_TEACHER = "none";
 
 // Pre-filled values for a day that's switched on in a brand-new group.
 const BLANK_DAY = { startTime: "08:00", tardyGraceMinutes: 10, absenceCheckTime: "10:00" };
@@ -106,10 +122,14 @@ function DayRow({ weekday, day }: { weekday: number; day?: ScheduleGroupDay }) {
 
 function GroupEditor({
   group,
+  teacherId,
+  staff,
   submitLabel,
   action,
 }: {
   group?: ScheduleGroup;
+  teacherId?: string | null;
+  staff: StaffOption[];
   submitLabel: string;
   action: (state: ScheduleGroupFormState, form: FormData) => Promise<ScheduleGroupFormState>;
 }) {
@@ -151,6 +171,33 @@ function GroupEditor({
             className="h-10"
           />
         </div>
+        <div className="space-y-2 sm:col-span-2">
+          <Label htmlFor={`${idPrefix}-teacher`}>Responsible teacher</Label>
+          <Select
+            name="teacher_id"
+            defaultValue={
+              teacherId && staff.some((member) => member.id === teacherId)
+                ? teacherId
+                : NO_TEACHER
+            }
+          >
+            <SelectTrigger id={`${idPrefix}-teacher`} className="h-10 w-full sm:w-72">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={NO_TEACHER}>No teacher assigned</SelectItem>
+              {staff.map((member) => (
+                <SelectItem key={member.id} value={member.id}>
+                  {member.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <p className="text-xs text-muted-foreground">
+            Owns attendance and Quran logging for this group&apos;s students. Shown on the
+            dashboard&apos;s staff checklist.
+          </p>
+        </div>
       </div>
 
       <div className="space-y-2">
@@ -176,7 +223,13 @@ function GroupEditor({
   );
 }
 
-export function ScheduleGroupsForm({ groups, studentCounts, ungroupedCount }: Props) {
+export function ScheduleGroupsForm({
+  groups,
+  studentCounts,
+  ungroupedCount,
+  staff,
+  groupTeachers,
+}: Props) {
   return (
     <Card className="border shadow-sm">
       <CardHeader>
@@ -222,7 +275,13 @@ export function ScheduleGroupsForm({ groups, studentCounts, ungroupedCount }: Pr
                   </Button>
                 </form>
               </div>
-              <GroupEditor group={group} submitLabel="Save group" action={updateScheduleGroup} />
+              <GroupEditor
+                group={group}
+                teacherId={groupTeachers[group.id] ?? null}
+                staff={staff}
+                submitLabel="Save group"
+                action={updateScheduleGroup}
+              />
             </div>
           );
         })}
@@ -235,6 +294,7 @@ export function ScheduleGroupsForm({ groups, studentCounts, ungroupedCount }: Pr
           {/* Keyed on the group count so the form resets after a successful create. */}
           <GroupEditor
             key={groups.length}
+            staff={staff}
             submitLabel="Create group"
             action={createScheduleGroup}
           />

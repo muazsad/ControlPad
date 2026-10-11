@@ -226,6 +226,8 @@ create table schedule_group_days (
 --   students.schedule_group_id           uuid references schedule_groups(id) on delete set null
 --   attendance.arrived_at                time   (local arrival time)
 --   settings.parent_alert_delay_minutes  int not null default 60
+--   schedule_groups.teacher_id           uuid references profiles(id) on delete set null
+--                                        (responsible teacher; dashboard staff checklist)
 
 -- Parent-reported absences (Oct 2026). Written by the server from the Twilio
 -- webhook; admins review reports on /attendance.
