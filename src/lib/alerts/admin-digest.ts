@@ -2,6 +2,8 @@ import { createServiceClient } from "@/lib/supabase/server";
 import { sendSms, type SendSmsInput, type SmsResult } from "@/lib/sms/send-sms";
 import { computeOverduePaymentCycles } from "@/lib/alerts/payment-overdue";
 import { evaluateQuranInactivity } from "@/lib/alerts/quran";
+import { bySeverity } from "@/lib/alerts/admin-dashboard-severity";
+import { paceForCourse, type PaceContext } from "@/lib/grades/pace";
 import { getServiceSchoolCalendar } from "@/lib/schedule/calendar-data";
 import {
   dayType,
@@ -31,6 +33,8 @@ export type AdminDigestSettings = {
   gradeFloor: number;
   quranInactivityDays: number;
   paymentDueDay: number;
+  paceGapThreshold: number;
+  missingAssignmentsThreshold: number;
 };
 
 export type AttendanceIssue = {
@@ -77,6 +81,28 @@ export type OverduePaymentIssue = {
   periodMonth: string;
 };
 
+/** A course whose % complete is at least the pace threshold behind where it should be. */
+export type BehindPaceIssue = {
+  studentId: string;
+  studentName: string;
+  courseId: string;
+  courseName: string;
+  actual: number;
+  expected: number;
+  gap: number;
+  tone: "warning" | "danger";
+};
+
+/** A course with at least the threshold number of missing assignments. */
+export type MissingWorkIssue = {
+  studentId: string;
+  studentName: string;
+  courseId: string;
+  courseName: string;
+  missing: number;
+  tone: "warning" | "danger";
+};
+
 export type AdminDailySummary = {
   date: string;
   schoolDayType: CalendarDayType;
@@ -86,6 +112,8 @@ export type AdminDailySummary = {
   unmarked: UnmarkedIssue[];
   lowGrades: LowGradeIssue[];
   droppingGrades: DroppingGradeIssue[];
+  behindPace: BehindPaceIssue[];
+  missingWork: MissingWorkIssue[];
   quranSlippage: QuranSlipIssue[];
   overduePayments: OverduePaymentIssue[];
 };
@@ -122,14 +150,20 @@ type AttendanceRow = {
   students: StudentRow | StudentRow[] | null;
 };
 
+type CourseRelation = {
+  id: string;
+  name: string;
+  start_date?: string | null;
+  end_date?: string | null;
+};
+
 export type GradeIssueRow = {
   course_id: string;
   grade_value: number | string;
+  percent_complete?: number | string | null;
+  missing_assignments?: number | null;
   recorded_at: string;
-  courses:
-    | { id: string; name: string }
-    | { id: string; name: string }[]
-    | null;
+  courses: CourseRelation | CourseRelation[] | null;
   students: StudentRow | StudentRow[] | null;
 };
 
@@ -245,6 +279,8 @@ function issueCount(summary: AdminDailySummary) {
     summary.unmarked.length +
     summary.lowGrades.length +
     summary.droppingGrades.length +
+    summary.behindPace.length +
+    summary.missingWork.length +
     summary.quranSlippage.length +
     summary.overduePayments.length
   );
@@ -303,6 +339,77 @@ export function summarizeGradeIssues(
   return { lowGrades, droppingGrades };
 }
 
+/**
+ * Behind-pace and missing-work issues from each course's latest snapshot
+ * (`gradeRows` newest first). Only active students are considered; lists are
+ * ordered most severe first.
+ */
+export function summarizePaceIssues(input: {
+  gradeRows: GradeIssueRow[];
+  /** Active students and their schedule group. */
+  students: { id: string; groupId: string | null }[];
+  context: PaceContext;
+  today: string;
+}): { behindPace: BehindPaceIssue[]; missingWork: MissingWorkIssue[] } {
+  const groupByStudent = new Map(input.students.map((s) => [s.id, s.groupId]));
+  const seen = new Set<string>();
+  const behindPace: BehindPaceIssue[] = [];
+  const missingWork: MissingWorkIssue[] = [];
+
+  for (const row of input.gradeRows) {
+    if (seen.has(row.course_id)) continue;
+    seen.add(row.course_id);
+
+    const student = firstRelated(row.students);
+    const course = firstRelated(row.courses);
+    if (!student || !course || !groupByStudent.has(student.id)) continue;
+
+    const pace = paceForCourse(
+      input.context,
+      input.today,
+      groupByStudent.get(student.id) ?? null,
+      { startDate: course.start_date ?? null, endDate: course.end_date ?? null },
+      {
+        percentComplete:
+          row.percent_complete == null ? null : Number(row.percent_complete),
+        missingAssignments: row.missing_assignments ?? null,
+      },
+    );
+    const base = {
+      studentId: student.id,
+      studentName: studentName(student),
+      courseId: row.course_id,
+      courseName: course.name,
+    };
+
+    if (
+      pace.gap !== null &&
+      pace.expected !== null &&
+      pace.actual !== null &&
+      (pace.paceTone === "warning" || pace.paceTone === "danger")
+    ) {
+      behindPace.push({
+        ...base,
+        actual: pace.actual,
+        expected: pace.expected,
+        gap: pace.gap,
+        tone: pace.paceTone,
+      });
+    }
+    if (
+      pace.missing !== null &&
+      (pace.missingTone === "warning" || pace.missingTone === "danger")
+    ) {
+      missingWork.push({ ...base, missing: pace.missing, tone: pace.missingTone });
+    }
+  }
+
+  return {
+    behindPace: behindPace.sort(bySeverity((issue) => issue.gap)),
+    missingWork: missingWork.sort(bySeverity((issue) => issue.missing)),
+  };
+}
+
 function namesForDigest(summary: AdminDailySummary) {
   const names = [
     ...summary.absences.map((issue) => issue.studentName),
@@ -310,6 +417,8 @@ function namesForDigest(summary: AdminDailySummary) {
     ...summary.unmarked.map((issue) => issue.studentName),
     ...summary.lowGrades.map((issue) => issue.studentName),
     ...summary.droppingGrades.map((issue) => issue.studentName),
+    ...summary.behindPace.map((issue) => issue.studentName),
+    ...summary.missingWork.map((issue) => issue.studentName),
     ...summary.quranSlippage.map((issue) => issue.studentName),
     ...summary.overduePayments.map((issue) => issue.studentName),
   ];
@@ -324,7 +433,7 @@ export function createSupabaseAdminDigestDatabase(): AdminDigestDatabase {
       const { data: settingsRow, error: settingsError } = await supabase
         .from("settings")
         .select(
-          "admin_digest_time, grade_floor, quran_inactivity_days, payment_due_day, school_start, tardy_window_hours",
+          "admin_digest_time, grade_floor, quran_inactivity_days, payment_due_day, school_start, tardy_window_hours, term_start, term_end, pace_gap_threshold, missing_assignments_threshold",
         )
         .eq("id", 1)
         .single();
@@ -336,6 +445,8 @@ export function createSupabaseAdminDigestDatabase(): AdminDigestDatabase {
         gradeFloor: Number(settingsRow.grade_floor),
         quranInactivityDays: Number(settingsRow.quran_inactivity_days),
         paymentDueDay: Number(settingsRow.payment_due_day),
+        paceGapThreshold: Number(settingsRow.pace_gap_threshold),
+        missingAssignmentsThreshold: Number(settingsRow.missing_assignments_threshold),
       };
       const [calendar, groups] = await Promise.all([
         getServiceSchoolCalendar(),
@@ -360,7 +471,7 @@ export function createSupabaseAdminDigestDatabase(): AdminDigestDatabase {
         supabase
           .from("grades")
           .select(
-            "course_id, grade_value, recorded_at, courses(id, name), students(id, first_name, last_name)",
+            "course_id, grade_value, percent_complete, missing_assignments, recorded_at, courses(id, name, start_date, end_date), students(id, first_name, last_name)",
           )
           .order("recorded_at", { ascending: false }),
         supabase
@@ -424,6 +535,29 @@ export function createSupabaseAdminDigestDatabase(): AdminDigestDatabase {
           schoolStart: String(settingsRow.school_start).slice(0, 5),
           tardyWindowHours: Number(settingsRow.tardy_window_hours),
         },
+      });
+
+      const { behindPace, missingWork } = summarizePaceIssues({
+        gradeRows: (gradesResult.data ?? []) as GradeIssueRow[],
+        students: students.map((student) => ({
+          id: student.id,
+          groupId: student.schedule_group_id ?? null,
+        })),
+        context: {
+          term: {
+            termStart: settingsRow.term_start ?? null,
+            termEnd: settingsRow.term_end ?? null,
+          },
+          paceGapThreshold: settings.paceGapThreshold,
+          missingAssignmentsThreshold: settings.missingAssignmentsThreshold,
+          calendar,
+          groups: new Map(groups.map((group) => [group.id, group])),
+          defaults: {
+            schoolStart: String(settingsRow.school_start).slice(0, 5),
+            tardyWindowHours: Number(settingsRow.tardy_window_hours),
+          },
+        },
+        today: date,
       });
 
       const latestQuranDate = new Map<string, string>();
@@ -496,6 +630,8 @@ export function createSupabaseAdminDigestDatabase(): AdminDigestDatabase {
         unmarked,
         lowGrades,
         droppingGrades,
+        behindPace,
+        missingWork,
         quranSlippage,
         overduePayments,
       };
@@ -533,6 +669,7 @@ export function formatAdminDigestSms(summary: AdminDailySummary) {
     `Absences ${summary.absences.length}, Tardies ${summary.tardies.length}, ` +
     (summary.unmarked.length > 0 ? `Not checked in ${summary.unmarked.length}, ` : "") +
     `Low grades ${summary.lowGrades.length}, Dropping ${summary.droppingGrades.length}, ` +
+    `Behind pace ${summary.behindPace.length}, Missing work ${summary.missingWork.length}, ` +
     `Quran ${summary.quranSlippage.length}, Payments ${summary.overduePayments.length}.`;
   const names = namesForDigest(summary);
   const details =

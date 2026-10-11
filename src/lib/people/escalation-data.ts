@@ -4,10 +4,13 @@ import {
   computeStudentEscalations,
   type EscalationAttendanceEntry,
   type EscalationNotificationEntry,
+  type EscalationPaceEntry,
   type EscalationPaymentEntry,
   type EscalationStudentInput,
   type EscalationStudentResult,
 } from "@/lib/people/escalation";
+import { paceForCourse, type PaceContext } from "@/lib/grades/pace";
+import { loadPaceContext } from "@/lib/grades/pace-data";
 import { periodMonthFor, paymentDueDate } from "@/lib/alerts/payment-overdue";
 import { getSchoolCalendar } from "@/lib/schedule/calendar-data";
 import { schoolDayWindowEnding } from "@/lib/schedule/calendar";
@@ -49,6 +52,70 @@ type NotificationRow = {
   trigger_type: string;
   created_at: string;
 };
+
+type PaceStudentRow = {
+  id: string;
+  schedule_group_id: string | null;
+  courses: {
+    id: string;
+    name: string;
+    start_date: string | null;
+    end_date: string | null;
+    grades: {
+      percent_complete: number | string | null;
+      missing_assignments: number | null;
+      recorded_at: string;
+    }[];
+  }[];
+};
+
+/** Per-student course pace from each course's latest snapshot (one query, no N+1). */
+async function loadPaceEntries(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  context: PaceContext,
+  today: string,
+): Promise<Map<string, EscalationPaceEntry[]>> {
+  const { data, error } = await supabase
+    .from("students")
+    .select(
+      "id, schedule_group_id, courses(id, name, start_date, end_date, grades(percent_complete, missing_assignments, recorded_at))",
+    )
+    .eq("enrollment_status", "active");
+  if (error) throw new Error(error.message);
+
+  const byStudent = new Map<string, EscalationPaceEntry[]>();
+  for (const student of (data ?? []) as unknown as PaceStudentRow[]) {
+    byStudent.set(
+      student.id,
+      student.courses.map((course) => {
+        const latest = course.grades.reduce<PaceStudentRow["courses"][number]["grades"][number] | null>(
+          (best, grade) => (!best || grade.recorded_at > best.recorded_at ? grade : best),
+          null,
+        );
+        const pace = paceForCourse(
+          context,
+          today,
+          student.schedule_group_id,
+          { startDate: course.start_date, endDate: course.end_date },
+          latest
+            ? {
+                percentComplete:
+                  latest.percent_complete == null ? null : Number(latest.percent_complete),
+                missingAssignments: latest.missing_assignments,
+              }
+            : null,
+        );
+        return {
+          courseId: course.id,
+          courseName: course.name,
+          paceTone: pace.paceTone,
+          missingTone: pace.missingTone,
+        };
+      }),
+    );
+  }
+  return byStudent;
+}
 
 function studentName(student: StudentRow) {
   return `${student.first_name} ${student.last_name}`.trim();
@@ -151,6 +218,7 @@ export async function getEscalationStudents(
     quranResult,
     paymentsResult,
     notificationsResult,
+    paceEntries,
   ] = await Promise.all([
     supabase
       .from("settings")
@@ -188,6 +256,7 @@ export async function getEscalationStudents(
       .select("student_id, trigger_type, created_at")
       .gte("created_at", startIso)
       .lte("created_at", `${endDate}T23:59:59.999Z`),
+    loadPaceContext().then((context) => loadPaceEntries(supabase, context, endDate)),
   ]);
 
   if (settingsResult.error) throw new Error(settingsResult.error.message);
@@ -275,6 +344,7 @@ export async function getEscalationStudents(
         lines_memorized: Number(entry.lines_memorized),
       })),
       payments: studentPayments,
+      paceCourses: paceEntries.get(student.id) ?? [],
       notifications: (notificationsByStudent.get(student.id) ?? []).map(
         (notification): EscalationNotificationEntry => ({
           createdAt: notification.created_at,

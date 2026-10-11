@@ -46,10 +46,12 @@ function Field({
   step,
   defaultValue,
   hint,
+  required = true,
 }: {
   label: string;
   name: keyof SettingsValues;
-  type?: "number" | "time";
+  type?: "number" | "time" | "date";
+  required?: boolean;
   min?: number;
   max?: number;
   step?: number;
@@ -68,7 +70,7 @@ function Field({
         step={step}
         defaultValue={defaultValue}
         className="h-10"
-        required
+        required={required}
       />
       <p className="text-xs leading-5 text-muted-foreground">{hint}</p>
     </div>
@@ -186,6 +188,53 @@ export function SettingsForm({ settings }: Props) {
             type="time"
             defaultValue={settings.admin_digest_time.slice(0, 5)}
             hint="Earliest time the daily admin digest should send."
+          />
+        </CardContent>
+      </Card>
+
+      <Card className="border shadow-sm">
+        <CardHeader>
+          <CardTitle>Term &amp; pace</CardTitle>
+          <CardDescription>
+            Used to work out where each student should be in a course. A course
+            can override these dates on its own page. Leave both term dates
+            blank to turn pace off for courses without their own dates.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="grid gap-5 sm:grid-cols-2">
+          <Field
+            label="Term start"
+            name="term_start"
+            type="date"
+            required={false}
+            defaultValue={settings.term_start ?? ""}
+            hint="First day of the school term."
+          />
+          <Field
+            label="Term end"
+            name="term_end"
+            type="date"
+            required={false}
+            defaultValue={settings.term_end ?? ""}
+            hint="Last day of the school term."
+          />
+          <Field
+            label="Pace gap threshold"
+            name="pace_gap_threshold"
+            min={1}
+            max={100}
+            step={1}
+            defaultValue={settings.pace_gap_threshold}
+            hint="Percentage points behind expected pace before parents and the admin are alerted. Twice this shows as red."
+          />
+          <Field
+            label="Missing assignments threshold"
+            name="missing_assignments_threshold"
+            min={1}
+            max={100}
+            step={1}
+            defaultValue={settings.missing_assignments_threshold}
+            hint="Missing assignments in one course before parents and the admin are alerted."
           />
         </CardContent>
       </Card>

@@ -1,3 +1,4 @@
+import type { PaceTone } from "@/lib/grades/pace";
 import { summarizeQuranProgress } from "@/lib/people/quran-progress";
 import { computeOverduePaymentCycles } from "@/lib/alerts/payment-overdue";
 import {
@@ -26,10 +27,24 @@ export const CRITICAL_SCORE_CUTOFF = 3;
 /** Grade drop in points that counts as a sustained dropping event. */
 export const GRADE_DROP_THRESHOLD = 5;
 
+/** Score per course behind pace: in the warning band / in the danger band (2× the threshold). */
+export const PACE_BEHIND_SCORE = 1;
+export const PACE_FAR_BEHIND_SCORE = 2;
+
+/** Score per course over the missing-assignments threshold: warning band / danger band. */
+export const MISSING_WORK_SCORE = 1;
+export const MISSING_WORK_HEAVY_SCORE = 2;
+
 // ── Types ────────────────────────────────────────────────────────────────────
 
 export type EscalationLevel = "ok" | "watch" | "critical";
-export type EscalationSignalKey = "grades" | "attendance" | "quran" | "payments";
+export type EscalationSignalKey =
+  | "grades"
+  | "attendance"
+  | "quran"
+  | "payments"
+  | "pace"
+  | "missing";
 
 export type EscalationGradeEntry = {
   date: string;
@@ -57,6 +72,14 @@ export type EscalationNotificationEntry = {
   triggerType: string;
 };
 
+/** One course's pace, evaluated by the caller (see `lib/grades/pace.ts`). */
+export type EscalationPaceEntry = {
+  courseId: string;
+  courseName: string;
+  paceTone: PaceTone;
+  missingTone: PaceTone;
+};
+
 export type EscalationStudentInput = {
   id: string;
   name: string;
@@ -66,6 +89,8 @@ export type EscalationStudentInput = {
   quranProgress: EscalationQuranEntry[];
   payments: EscalationPaymentEntry[];
   notifications: EscalationNotificationEntry[];
+  /** Optional: omitted means no pace data, so the pace/missing signals stay quiet. */
+  paceCourses?: EscalationPaceEntry[];
 };
 
 export type EscalationSettings = {
@@ -108,6 +133,14 @@ export type PaymentEscalationSignal = EscalationSignalBreakdown & {
   maxDaysOverdue: number;
 };
 
+export type PaceEscalationSignal = EscalationSignalBreakdown & {
+  behindCourses: number;
+};
+
+export type MissingWorkEscalationSignal = EscalationSignalBreakdown & {
+  courses: number;
+};
+
 export type EscalationStudentResult = {
   studentId: string;
   studentName: string;
@@ -121,6 +154,8 @@ export type EscalationStudentResult = {
     attendance: AttendanceEscalationSignal;
     quran: QuranEscalationSignal;
     payments: PaymentEscalationSignal;
+    pace: PaceEscalationSignal;
+    missing: MissingWorkEscalationSignal;
   };
 };
 
@@ -345,6 +380,60 @@ function paymentSignal(
   return { ...signal, overdueCycles: overdue.length, maxDaysOverdue };
 }
 
+/** Score a list of per-course tones: warning band and danger band score differently. */
+function toneSignal(
+  courses: { courseName: string; tone: PaceTone }[],
+  scores: { warning: number; danger: number },
+  settings: EscalationSettings,
+  label: string,
+): EscalationSignalBreakdown & { courses: number } {
+  const flagged = courses.filter(
+    (course) => course.tone === "warning" || course.tone === "danger",
+  );
+  const score = flagged.reduce(
+    (sum, course) => sum + (course.tone === "danger" ? scores.danger : scores.warning),
+    0,
+  );
+  const signal = baseSignal({
+    occurrences: flagged.length,
+    score,
+    dates: [],
+    asOfDate: settings.asOfDate,
+    details:
+      flagged.length > 0
+        ? `${flagged.length} course${flagged.length === 1 ? "" : "s"} ${label} (${flagged
+            .map((course) => course.courseName)
+            .join(", ")})`
+        : `No courses ${label}`,
+  });
+  return { ...signal, courses: flagged.length };
+}
+
+function paceSignal(
+  paceCourses: EscalationPaceEntry[],
+  settings: EscalationSettings,
+): PaceEscalationSignal {
+  const { courses, ...signal } = toneSignal(
+    paceCourses.map((course) => ({ courseName: course.courseName, tone: course.paceTone })),
+    { warning: PACE_BEHIND_SCORE, danger: PACE_FAR_BEHIND_SCORE },
+    settings,
+    "behind pace",
+  );
+  return { ...signal, behindCourses: courses };
+}
+
+function missingWorkSignal(
+  paceCourses: EscalationPaceEntry[],
+  settings: EscalationSettings,
+): MissingWorkEscalationSignal {
+  return toneSignal(
+    paceCourses.map((course) => ({ courseName: course.courseName, tone: course.missingTone })),
+    { warning: MISSING_WORK_SCORE, danger: MISSING_WORK_HEAVY_SCORE },
+    settings,
+    "over the missing-work limit",
+  );
+}
+
 // ── Public functions ─────────────────────────────────────────────────────────
 
 export function computeStudentEscalations(
@@ -362,6 +451,8 @@ export function computeStudentEscalations(
           settings,
           student.enrollmentAnchorDate,
         ),
+        pace: paceSignal(student.paceCourses ?? [], settings),
+        missing: missingWorkSignal(student.paceCourses ?? [], settings),
       };
       const signalList = Object.entries(signals) as [
         EscalationSignalKey,

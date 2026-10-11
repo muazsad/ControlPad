@@ -12,7 +12,9 @@ export type NotificationTrigger =
   | "special_day"
   | "absence_report_reply"
   | "parent_message"
-  | "announcement";
+  | "announcement"
+  | "pace_behind"
+  | "missing_assignments";
 
 export type RecipientType = "admin" | "parent";
 

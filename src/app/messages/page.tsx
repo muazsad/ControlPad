@@ -75,6 +75,8 @@ const triggerLabels: Record<string, string> = {
   special_day: "Special day",
   absence_report_reply: "Absence report reply",
   parent_message: "Parent text (forwarded)",
+  pace_behind: "Behind pace",
+  missing_assignments: "Missing work",
 };
 
 const statusDisplay: Record<NotificationRow["status"], { label: string; tone: StatusTone }> = {

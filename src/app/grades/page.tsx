@@ -1,13 +1,17 @@
 import Link from "next/link";
-import { AlertTriangle, GraduationCap } from "lucide-react";
+import { AlertTriangle, GraduationCap, ListChecks } from "lucide-react";
 
 import { AppShell } from "@/components/controlpad/app-shell";
 import { DataTable } from "@/components/controlpad/data-table";
 import { EmptyState } from "@/components/controlpad/empty-state";
 import { PageHeader } from "@/components/controlpad/page-header";
 import { StatusBadge } from "@/components/controlpad/status-badge";
+import { Button } from "@/components/ui/button";
 import { getCurrentProfile } from "@/lib/auth/current-profile";
 import { formatGrade, gradeTone } from "./grade-display";
+import { paceForCourse, worstTone } from "@/lib/grades/pace";
+import { loadPaceContext } from "@/lib/grades/pace-data";
+import { easternDateKey } from "@/lib/grades/sweep";
 import { getAllStudentMetrics } from "@/lib/people/student-metrics";
 import { createClient } from "@/lib/supabase/server";
 
@@ -15,10 +19,35 @@ export default async function GradesPage() {
   const profile = await getCurrentProfile();
   const supabase = await createClient();
 
-  const [students, { data: settingsData }] = await Promise.all([
+  const [metrics, { data: settingsData }, paceContext] = await Promise.all([
     getAllStudentMetrics(),
     supabase.from("settings").select("grade_floor").eq("id", 1).single(),
+    loadPaceContext(),
   ]);
+
+  // Pace per student from the latest snapshot fields already in the metrics query.
+  const today = easternDateKey(new Date());
+  const students = metrics.map((student) => {
+    const evaluations = student.courseSnapshots.map((course) =>
+      paceForCourse(
+        paceContext,
+        today,
+        student.groupId,
+        { startDate: course.startDate, endDate: course.endDate },
+        { percentComplete: course.latestPercent, missingAssignments: course.latestMissing },
+      ),
+    );
+    const behind = evaluations.filter(
+      (e) => e.paceTone === "warning" || e.paceTone === "danger",
+    ).length;
+    const missing = evaluations.reduce((sum, e) => sum + (e.missing ?? 0), 0);
+    return {
+      ...student,
+      paceBehind: behind,
+      paceMissing: missing,
+      paceTone: worstTone(evaluations.map((e) => e.paceTone)),
+    };
+  });
 
   const gradeFloor =
     settingsData?.grade_floor == null ? null : Number(settingsData.grade_floor);
@@ -29,6 +58,16 @@ export default async function GradesPage() {
         <PageHeader
           title="Grades"
           description="Grade averages and performance across all students. Click a student to view full course history."
+          action={
+            profile.role === "admin" || profile.role === "moderator" ? (
+              <Button asChild className="h-10">
+                <Link href="/grades/sweep">
+                  <ListChecks className="size-4" aria-hidden="true" />
+                  Weekly sweep
+                </Link>
+              </Button>
+            ) : undefined
+          }
         />
 
         <DataTable
@@ -91,6 +130,29 @@ export default async function GradesPage() {
                 </span>
               ),
               className: "text-muted-foreground",
+            },
+            {
+              key: "pace",
+              header: "Pace",
+              cell: (row) => (
+                <div className="space-y-1">
+                  <StatusBadge
+                    status={
+                      row.paceTone === "neutral"
+                        ? "No pace data"
+                        : row.paceBehind > 0
+                          ? `${row.paceBehind} behind`
+                          : "On pace"
+                    }
+                    tone={row.paceTone}
+                  />
+                  {row.paceMissing > 0 ? (
+                    <p className="text-xs text-muted-foreground">
+                      {row.paceMissing} missing
+                    </p>
+                  ) : null}
+                </div>
+              ),
             },
             {
               key: "performance",

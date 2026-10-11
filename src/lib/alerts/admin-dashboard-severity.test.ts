@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import {
+  bySeverity,
   dailySummarySeverity,
   gradeIssueSeverity,
 } from "./admin-dashboard-severity";
@@ -15,12 +16,16 @@ const summary: AdminDailySummary = {
     gradeFloor: 70,
     quranInactivityDays: 7,
     paymentDueDay: 5,
+    paceGapThreshold: 10,
+    missingAssignmentsThreshold: 3,
   },
   absences: [],
   tardies: [],
   unmarked: [],
   lowGrades: [],
   droppingGrades: [],
+  behindPace: [],
+  missingWork: [],
   quranSlippage: [],
   overduePayments: [],
 };
@@ -73,5 +78,40 @@ describe("admin dashboard severity", () => {
     assert.equal(result.tone, "danger");
     assert.equal(result.label, "Needs attention");
     assert.equal(result.dangerCount, 1);
+  });
+
+  it("counts pace and missing-work items by their own tone", () => {
+    const issue = {
+      studentId: "s1",
+      studentName: "Amina Noor",
+      courseId: "algebra",
+      courseName: "Algebra",
+    };
+    const warning = dailySummarySeverity({
+      ...summary,
+      behindPace: [{ ...issue, actual: 45, expected: 55, gap: 10, tone: "warning" }],
+    });
+    assert.equal(warning.tone, "warning");
+    assert.equal(warning.warningCount, 1);
+
+    const danger = dailySummarySeverity({
+      ...summary,
+      missingWork: [{ ...issue, missing: 6, tone: "danger" }],
+    });
+    assert.equal(danger.tone, "danger");
+    assert.equal(danger.dangerCount, 1);
+  });
+
+  it("orders issues danger first, then by size", () => {
+    const items = [
+      { tone: "warning" as const, gap: 15 },
+      { tone: "danger" as const, gap: 22 },
+      { tone: "danger" as const, gap: 30 },
+    ];
+    items.sort(bySeverity((item) => item.gap));
+    assert.deepEqual(
+      items.map((item) => item.gap),
+      [30, 22, 15],
+    );
   });
 });
