@@ -26,7 +26,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { SWEEP_WINDOW_DAYS, parseGradeInput } from "@/lib/grades/sweep";
+import type { PaceTone } from "@/lib/grades/pace";
+import {
+  SWEEP_WINDOW_DAYS,
+  invalidMessage,
+  parseGradeInput,
+  parseMissingInput,
+  type SweepField,
+} from "@/lib/grades/sweep";
 
 import { saveGradeSweep } from "../actions";
 
@@ -38,13 +45,61 @@ export type SweepRow = {
   groupId: string | null;
   lastValue: number | null;
   lastDate: string | null;
+  lastPercent: number | null;
+  lastMissing: number | null;
+  /** Where the student should be today (null = no term/course dates). */
+  expectedPercent: number | null;
+  paceTone: PaceTone;
+  missingTone: PaceTone;
   /** From server data; only changes after a save. */
   updatedRecently: boolean;
 };
 
 export type SweepGroup = { id: string; name: string };
 
-type Entries = Record<string, string>;
+type SweepFields = Record<SweepField, string>;
+type Entries = Record<string, SweepFields>;
+
+/** Left-to-right order of the inputs in a row. */
+const FIELDS: SweepField[] = ["grade", "percent", "missing"];
+const FIELD_LABELS: Record<SweepField, string> = {
+  grade: "Grade",
+  percent: "% complete",
+  missing: "Missing",
+};
+const EMPTY_FIELDS: SweepFields = { grade: "", percent: "", missing: "" };
+
+const toneText: Record<PaceTone, string> = {
+  success: "text-status-success",
+  warning: "text-status-warning",
+  danger: "text-status-danger",
+  neutral: "text-muted-foreground",
+};
+
+function fieldsOf(entries: Entries, courseId: string): SweepFields {
+  return entries[courseId] ?? EMPTY_FIELDS;
+}
+
+function rowHasText(fields: SweepFields | undefined): boolean {
+  return Boolean(fields) && FIELDS.some((field) => hasText(fields?.[field]));
+}
+
+/** The first invalid field in a row, if any. */
+function firstInvalid(fields: SweepFields): SweepField | null {
+  for (const field of FIELDS) {
+    const parsed =
+      field === "missing"
+        ? parseMissingInput(fields[field])
+        : parseGradeInput(fields[field]);
+    if (parsed.status === "invalid") return field;
+  }
+  return null;
+}
+
+function fieldIsInvalid(field: SweepField, value: string): boolean {
+  const parsed = field === "missing" ? parseMissingInput(value) : parseGradeInput(value);
+  return parsed.status === "invalid";
+}
 
 const DRAFT_KEY_PREFIX = "grade-sweep-draft";
 const GROUP_ALL = "all";
@@ -74,6 +129,8 @@ export function SweepForm({
   groups: SweepGroup[];
 }) {
   const [entries, setEntries] = useState<Entries>({});
+  /** Messages from the last save for rows the server rejected. */
+  const [serverErrors, setServerErrors] = useState<Record<string, string>>({});
   const [groupFilter, setGroupFilter] = useState(GROUP_ALL);
   const [search, setSearch] = useState("");
   const [onlyStale, setOnlyStale] = useState(false);
@@ -123,6 +180,11 @@ export function SweepForm({
     [visibleRows],
   );
 
+  const rowIndex = useMemo(
+    () => new Map(visibleRows.map((row, index) => [row.courseId, index])),
+    [visibleRows],
+  );
+
   // ── Entries that still correspond to a real course ─────────────────────────
 
   const courseIds = useMemo(
@@ -133,23 +195,42 @@ export function SweepForm({
   const unsavedCount = useMemo(
     () =>
       Object.entries(entries).filter(
-        ([courseId, value]) => courseIds.has(courseId) && hasText(value),
+        ([courseId, fields]) => courseIds.has(courseId) && rowHasText(fields),
       ).length,
     [entries, courseIds],
   );
 
+  // A row is submitted only when it has text and every field in it is valid.
   const submittable = useMemo(
     () =>
       Object.entries(entries)
         .filter(
-          ([courseId, value]) =>
-            courseIds.has(courseId) && parseGradeInput(value).status === "ok",
+          ([courseId, fields]) =>
+            courseIds.has(courseId) && rowHasText(fields) && firstInvalid(fields) === null,
         )
-        .map(([courseId, value]) => ({ courseId, value })),
+        .map(([courseId, fields]) => ({
+          courseId,
+          value: fields.grade,
+          percent: fields.percent,
+          missing: fields.missing,
+        })),
     [entries, courseIds],
   );
 
   const updatedCount = rows.filter((row) => row.updatedRecently).length;
+
+  function setField(courseId: string, field: SweepField, value: string) {
+    setEntries((prev) => ({
+      ...prev,
+      [courseId]: { ...fieldsOf(prev, courseId), [field]: value },
+    }));
+    setServerErrors((prev) => {
+      if (!(courseId in prev)) return prev;
+      const next = { ...prev };
+      delete next[courseId];
+      return next;
+    });
+  }
 
   // ── Draft safety net (every storage access guarded) ────────────────────────
 
@@ -167,9 +248,19 @@ export function SweepForm({
         if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
           const restored: Entries = {};
           for (const [courseId, value] of Object.entries(parsed)) {
-            if (courseIds.has(courseId) && typeof value === "string" && hasText(value)) {
-              restored[courseId] = value;
-            }
+            if (!courseIds.has(courseId)) continue;
+            // Older drafts stored just the grade as a string.
+            const fields: SweepFields =
+              typeof value === "string"
+                ? { ...EMPTY_FIELDS, grade: value }
+                : value && typeof value === "object"
+                  ? {
+                      grade: String((value as Partial<SweepFields>).grade ?? ""),
+                      percent: String((value as Partial<SweepFields>).percent ?? ""),
+                      missing: String((value as Partial<SweepFields>).missing ?? ""),
+                    }
+                  : EMPTY_FIELDS;
+            if (rowHasText(fields)) restored[courseId] = fields;
           }
           const count = Object.keys(restored).length;
           if (count > 0) {
@@ -191,8 +282,8 @@ export function SweepForm({
     if (!hydrated) return;
     try {
       const draft: Entries = {};
-      for (const [courseId, value] of Object.entries(entries)) {
-        if (hasText(value)) draft[courseId] = value;
+      for (const [courseId, fields] of Object.entries(entries)) {
+        if (rowHasText(fields)) draft[courseId] = fields;
       }
       if (Object.keys(draft).length === 0) {
         window.localStorage.removeItem(key);
@@ -216,23 +307,32 @@ export function SweepForm({
 
   // ── Keyboard ───────────────────────────────────────────────────────────────
 
-  const focusInput = useCallback((courseId: string | undefined) => {
-    const input = courseId ? inputRefs.current.get(courseId) : undefined;
-    if (!input) return false;
-    input.focus();
-    input.select();
-    return true;
-  }, []);
+  const focusInput = useCallback(
+    (courseId: string | undefined, field: SweepField) => {
+      const input = courseId ? inputRefs.current.get(`${courseId}:${field}`) : undefined;
+      if (!input) return false;
+      input.focus();
+      input.select();
+      return true;
+    },
+    [],
+  );
 
   useEffect(() => {
-    focusInput(visibleRows[0]?.courseId);
+    focusInput(visibleRows[0]?.courseId, "grade");
     // Autofocus once on load only.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  function handleKeyDown(event: KeyboardEvent<HTMLInputElement>, index: number) {
+  // Enter / arrows move within a column; Tab moves across the row, then down.
+  function handleKeyDown(
+    event: KeyboardEvent<HTMLInputElement>,
+    index: number,
+    field: SweepField,
+  ) {
     if (event.nativeEvent.isComposing) return;
     const courseId = visibleRows[index].courseId;
+    const fieldIndex = FIELDS.indexOf(field);
 
     switch (event.key) {
       case "Enter":
@@ -241,24 +341,33 @@ export function SweepForm({
         event.preventDefault();
         const backwards = event.key === "ArrowUp" || (event.key === "Enter" && event.shiftKey);
         if (backwards) {
-          focusInput(visibleRows[index - 1]?.courseId);
-        } else if (!focusInput(visibleRows[index + 1]?.courseId)) {
+          focusInput(visibleRows[index - 1]?.courseId, field);
+        } else if (!focusInput(visibleRows[index + 1]?.courseId, field)) {
           saveRef.current?.focus();
         }
         break;
       }
       case "Tab": {
-        const target = visibleRows[index + (event.shiftKey ? -1 : 1)]?.courseId;
+        let targetRow = index;
+        let targetField = fieldIndex + (event.shiftKey ? -1 : 1);
+        if (targetField >= FIELDS.length) {
+          targetRow += 1;
+          targetField = 0;
+        } else if (targetField < 0) {
+          targetRow -= 1;
+          targetField = FIELDS.length - 1;
+        }
+        const target = visibleRows[targetRow]?.courseId;
         // At either end, fall through to normal browser tabbing.
         if (target) {
           event.preventDefault();
-          focusInput(target);
+          focusInput(target, FIELDS[targetField]);
         }
         break;
       }
       case "Escape":
         event.preventDefault();
-        setEntries((prev) => ({ ...prev, [courseId]: "" }));
+        setField(courseId, field, "");
         break;
     }
   }
@@ -284,12 +393,24 @@ export function SweepForm({
       }
 
       const invalidIds = new Set(result.invalid.map((item) => item.courseId));
+      setServerErrors(
+        Object.fromEntries(
+          result.invalid.map((item) => [item.courseId, invalidMessage(item.field, item.reason)]),
+        ),
+      );
       setEntries((prev) => {
         const next = { ...prev };
-        for (const { courseId, value } of payload) {
-          // Keep invalid ones, and anything edited while the save ran.
-          if (!invalidIds.has(courseId) && next[courseId] === value) {
-            delete next[courseId];
+        for (const sent of payload) {
+          const current = next[sent.courseId];
+          // Keep rejected rows, and anything edited while the save ran.
+          if (
+            !invalidIds.has(sent.courseId) &&
+            current &&
+            current.grade === sent.value &&
+            current.percent === sent.percent &&
+            current.missing === sent.missing
+          ) {
+            delete next[sent.courseId];
           }
         }
         return next;
@@ -309,6 +430,34 @@ export function SweepForm({
         title="No courses to update"
         description="Active students with courses will appear here."
         icon={GraduationCap}
+      />
+    );
+  }
+
+  function fieldInput(
+    row: SweepRow,
+    field: SweepField,
+    placeholder: string,
+  ) {
+    const index = rowIndex.get(row.courseId) ?? 0;
+    const value = fieldsOf(entries, row.courseId)[field];
+    return (
+      <Input
+        ref={(element) => {
+          const refKey = `${row.courseId}:${field}`;
+          if (element) inputRefs.current.set(refKey, element);
+          else inputRefs.current.delete(refKey);
+        }}
+        type="text"
+        inputMode={field === "missing" ? "numeric" : "decimal"}
+        autoComplete="off"
+        value={value}
+        placeholder={placeholder}
+        aria-label={`${FIELD_LABELS[field]} for ${row.studentName}, ${row.courseName}`}
+        aria-invalid={fieldIsInvalid(field, value) || undefined}
+        onChange={(event) => setField(row.courseId, field, event.target.value)}
+        onKeyDown={(event) => handleKeyDown(event, index, field)}
+        className="h-9 w-20 tabular-nums"
       />
     );
   }
@@ -416,53 +565,48 @@ export function SweepForm({
               row.lastValue === null ? (
                 <span className="text-muted-foreground">never</span>
               ) : (
-                <span className="tabular-nums">
-                  {formatLastGrade(row.lastValue)}
-                  <span className="ml-2 text-xs text-muted-foreground">
-                    {row.lastDate}
+                <div className="space-y-0.5">
+                  <span className="tabular-nums">
+                    {formatLastGrade(row.lastValue)}
+                    <span className="ml-2 text-xs text-muted-foreground">
+                      {row.lastDate}
+                    </span>
                   </span>
-                </span>
+                  {row.lastPercent !== null || row.lastMissing !== null ? (
+                    <p className="text-xs tabular-nums">
+                      {row.lastPercent !== null ? (
+                        <span className={toneText[row.paceTone]}>
+                          {Math.round(row.lastPercent)}% done
+                          {row.expectedPercent !== null
+                            ? ` · pace ${Math.round(row.expectedPercent)}%`
+                            : ""}
+                        </span>
+                      ) : null}
+                      {row.lastMissing !== null ? (
+                        <span className={toneText[row.missingTone]}>
+                          {row.lastPercent !== null ? " · " : ""}
+                          {row.lastMissing} missing
+                        </span>
+                      ) : null}
+                    </p>
+                  ) : null}
+                </div>
               ),
           },
+          { key: "grade", header: "Grade", cell: (row) => fieldInput(row, "grade", "0–100") },
           {
-            key: "new",
-            header: "New grade",
-            cell: (row) => {
-              const index = visibleRows.findIndex(
-                (r) => r.courseId === row.courseId,
-              );
-              const value = entries[row.courseId] ?? "";
-              const invalid = parseGradeInput(value).status === "invalid";
-              return (
-                <Input
-                  ref={(element) => {
-                    if (element) inputRefs.current.set(row.courseId, element);
-                    else inputRefs.current.delete(row.courseId);
-                  }}
-                  type="text"
-                  inputMode="decimal"
-                  autoComplete="off"
-                  value={value}
-                  aria-label={`New grade for ${row.studentName}, ${row.courseName}`}
-                  aria-invalid={invalid || undefined}
-                  onChange={(event) =>
-                    setEntries((prev) => ({
-                      ...prev,
-                      [row.courseId]: event.target.value,
-                    }))
-                  }
-                  onKeyDown={(event) => handleKeyDown(event, index)}
-                  className="h-9 w-24 tabular-nums"
-                />
-              );
-            },
+            key: "percent",
+            header: "% complete",
+            cell: (row) => fieldInput(row, "percent", "0–100"),
           },
+          { key: "missing", header: "Missing", cell: (row) => fieldInput(row, "missing", "0") },
           {
             key: "status",
             header: "Status",
             cell: (row) => {
-              const value = entries[row.courseId];
-              const parsed = parseGradeInput(value ?? "");
+              const fields = fieldsOf(entries, row.courseId);
+              const invalidField = firstInvalid(fields);
+              const serverError = serverErrors[row.courseId];
               return (
                 <div className="flex flex-wrap items-center gap-2">
                   {row.updatedRecently ? (
@@ -472,11 +616,13 @@ export function SweepForm({
                   ) : (
                     <StatusBadge status="Needs update" tone="warning" />
                   )}
-                  {parsed.status === "invalid" ? (
+                  {serverError ? (
+                    <span className="text-xs text-status-danger">{serverError}</span>
+                  ) : invalidField ? (
                     <span className="text-xs text-status-danger">
-                      Enter 0–100, one decimal
+                      Check {FIELD_LABELS[invalidField].toLowerCase()}
                     </span>
-                  ) : parsed.status === "ok" ? (
+                  ) : rowHasText(fields) ? (
                     <span className="text-xs text-muted-foreground">unsaved</span>
                   ) : null}
                 </div>

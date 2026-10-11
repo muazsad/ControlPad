@@ -253,6 +253,30 @@ export function carryForward(
   };
 }
 
+/** A short, plain message for the first invalid field. */
+export function invalidMessage(field: SweepField, reason: SweepInvalidReason): string {
+  const label =
+    field === "grade" ? "Grade" : field === "percent" ? "% complete" : "Missing assignments";
+  switch (reason) {
+    case "too_many_decimals":
+      return `${label}: use at most ${GRADE_MAX_DECIMALS} decimal place.`;
+    case "out_of_range":
+      return field === "missing"
+        ? `${label}: enter ${MISSING_MIN}–${MISSING_MAX}.`
+        : `${label}: enter ${GRADE_MIN}–${GRADE_MAX}.`;
+    case "not_a_whole_number":
+      return `${label}: enter a whole number.`;
+    case "grade_required":
+      return "Enter a grade: this course has none recorded yet.";
+    case "unknown_course":
+      return "That course could not be found.";
+    case "duplicate":
+      return "That course was entered twice.";
+    default:
+      return `${label}: enter a number.`;
+  }
+}
+
 // ── Eastern-time window ──────────────────────────────────────────────────────
 
 const easternFormatter = new Intl.DateTimeFormat("en-CA", {

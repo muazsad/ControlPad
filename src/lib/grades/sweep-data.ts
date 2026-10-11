@@ -3,7 +3,12 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 /** PostgREST returns at most 1000 rows per request, so we page. */
 const GRADE_PAGE_SIZE = 1000;
 
-export type LatestGrade = { value: number; recordedAt: string };
+export type LatestGrade = {
+  value: number;
+  percentComplete: number | null;
+  missingAssignments: number | null;
+  recordedAt: string;
+};
 
 /**
  * Latest grade snapshot per course, for courses of ACTIVE students only.
@@ -19,7 +24,9 @@ export async function fetchLatestGrades(
   for (let from = 0; ; from += GRADE_PAGE_SIZE) {
     const { data, error } = await supabase
       .from("grades")
-      .select("course_id, grade_value, recorded_at, students!inner(enrollment_status)")
+      .select(
+        "course_id, grade_value, percent_complete, missing_assignments, recorded_at, students!inner(enrollment_status)",
+      )
       .eq("students.enrollment_status", "active")
       .order("recorded_at", { ascending: false })
       .order("id", { ascending: false })
@@ -31,6 +38,10 @@ export async function fetchLatestGrades(
       if (!latest.has(row.course_id)) {
         latest.set(row.course_id, {
           value: Number(row.grade_value),
+          percentComplete:
+            row.percent_complete == null ? null : Number(row.percent_complete),
+          missingAssignments:
+            row.missing_assignments == null ? null : Number(row.missing_assignments),
           recordedAt: row.recorded_at,
         });
       }
