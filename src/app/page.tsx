@@ -58,6 +58,8 @@ function totalIssues(summary: AdminDailySummary) {
     summary.unmarked.length +
     summary.lowGrades.length +
     summary.droppingGrades.length +
+    summary.behindPace.length +
+    summary.missingWork.length +
     summary.quranSlippage.length +
     summary.overduePayments.length
   );
@@ -106,6 +108,8 @@ function escalationTone(level: EscalationLevel) {
 
 function signalLabel(signal: string) {
   if (signal === "quran") return "Quran";
+  if (signal === "pace") return "Behind pace";
+  if (signal === "missing") return "Missing work";
   return signal.charAt(0).toUpperCase() + signal.slice(1);
 }
 
@@ -168,7 +172,11 @@ function CriticalStudentsSection({
                     .map(([key, signal]) => (
                       <StatusBadge
                         key={key}
-                        status={`${signalLabel(key)} ${signal.occurrences}x / ${signal.durationDays}d`}
+                        status={
+                          key === "pace" || key === "missing"
+                            ? `${signalLabel(key)} ${signal.occurrences} course${signal.occurrences === 1 ? "" : "s"}`
+                            : `${signalLabel(key)} ${signal.occurrences}x / ${signal.durationDays}d`
+                        }
                         tone={escalationTone(signal.level)}
                       />
                     ))}
@@ -387,6 +395,67 @@ function AdminDashboard({
                 </p>
               </div>
               <StatusBadge status="Dropping" tone="warning" />
+            </div>
+          ))}
+        </IssueGroup>
+
+        <IssueGroup
+          title="Behind pace"
+          href="/grades"
+          empty="No courses are behind pace."
+          hasItems={summary.behindPace.length > 0}
+        >
+          {summary.behindPace.map((issue) => (
+            <div
+              key={`pace-${issue.courseId}`}
+              className="flex items-center justify-between gap-3 border-b py-2 last:border-0"
+            >
+              <div>
+                <Link
+                  href={`/students/${issue.studentId}`}
+                  className="text-sm font-medium hover:underline"
+                >
+                  {issue.studentName}
+                </Link>
+                <p className="text-xs text-muted-foreground">
+                  {issue.courseName} - {Math.round(issue.actual)}% done, should
+                  be about {Math.round(issue.expected)}%
+                </p>
+              </div>
+              <StatusBadge
+                status={`${Math.round(issue.gap)} pts behind`}
+                tone={issue.tone}
+              />
+            </div>
+          ))}
+        </IssueGroup>
+
+        <IssueGroup
+          title="Missing work"
+          href="/grades"
+          empty="No courses are over the missing-assignment threshold."
+          hasItems={summary.missingWork.length > 0}
+        >
+          {summary.missingWork.map((issue) => (
+            <div
+              key={`missing-${issue.courseId}`}
+              className="flex items-center justify-between gap-3 border-b py-2 last:border-0"
+            >
+              <div>
+                <Link
+                  href={`/students/${issue.studentId}`}
+                  className="text-sm font-medium hover:underline"
+                >
+                  {issue.studentName}
+                </Link>
+                <p className="text-xs text-muted-foreground">
+                  {issue.courseName}
+                </p>
+              </div>
+              <StatusBadge
+                status={`${issue.missing} missing`}
+                tone={issue.tone}
+              />
             </div>
           ))}
         </IssueGroup>

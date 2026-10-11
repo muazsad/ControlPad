@@ -209,6 +209,14 @@ export function paceForCourse(
   });
 }
 
+/** The most severe tone in a list (danger > warning > success > neutral). */
+export function worstTone(tones: PaceTone[]): PaceTone {
+  for (const tone of ["danger", "warning", "success"] as const) {
+    if (tones.includes(tone)) return tone;
+  }
+  return "neutral";
+}
+
 // ── ISO week (alert dedupe keys) ─────────────────────────────────────────────
 
 /** ISO 8601 week as "YYYY-Www" for a YYYY-MM-DD date. */
