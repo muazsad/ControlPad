@@ -2,17 +2,27 @@
 -- parent text. Additive only: widens two check constraints, adds nullable /
 -- defaulted columns and one enum value. Existing rows keep their behavior.
 
--- 1. More special-day types.
-alter table school_special_days
-  drop constraint if exists school_special_days_type_check;
+-- 1. Replace the original check constraints (type list and times) with wider
+--    ones. Looked up by table rather than assumed name.
+do $$
+declare
+  constraint_name text;
+begin
+  for constraint_name in
+    select conname from pg_constraint
+    where conrelid = 'public.school_special_days'::regclass and contype = 'c'
+  loop
+    execute format('alter table public.school_special_days drop constraint %I', constraint_name);
+  end loop;
+end $$;
+
+-- More special-day types.
 alter table school_special_days
   add constraint school_special_days_type_check
   check (type in ('no_school', 'half_day', 'schedule_change', 'no_gcvs', 'field_trip', 'other'));
 
 -- 2. Times: half days and schedule changes need both; other types may set
 --    them optionally (end after start when both are given).
-alter table school_special_days
-  drop constraint if exists school_special_days_check;
 alter table school_special_days
   add constraint school_special_days_times_check
   check (
