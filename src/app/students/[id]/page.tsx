@@ -31,6 +31,10 @@ import { createClient } from "@/lib/supabase/server";
 import { CourseForm } from "@/app/grades/course-form";
 import { formatGrade, gradeTone, latestGrade } from "@/app/grades/grade-display";
 import { GradeForm } from "@/app/grades/grade-form";
+import { PaceBar } from "@/components/controlpad/pace-bar";
+import { paceForCourse } from "@/lib/grades/pace";
+import { loadPaceContext } from "@/lib/grades/pace-data";
+import { easternDateKey } from "@/lib/grades/sweep";
 import {
   StudentGuardianLinks,
   type LinkedGuardian,
@@ -41,6 +45,8 @@ type GradeSnapshot = {
   grade_value: number;
   recorded_at: string;
   note: string | null;
+  percent_complete: number | null;
+  missing_assignments: number | null;
 };
 
 type CourseRow = {
@@ -48,6 +54,8 @@ type CourseRow = {
   name: string;
   gcvs_course_code: string | null;
   student_id: string;
+  start_date: string | null;
+  end_date: string | null;
   grades: GradeSnapshot[];
 };
 
@@ -146,6 +154,7 @@ export default async function StudentDetailPage({
     { data: settingsData },
     { data: quranData },
     { data: attendanceData },
+    paceContext,
   ] = await Promise.all([
     supabase
       .from("student_guardians")
@@ -155,7 +164,9 @@ export default async function StudentDetailPage({
       .eq("student_id", id),
     supabase
       .from("courses")
-      .select("id, name, gcvs_course_code, student_id, grades(id, grade_value, recorded_at, note)")
+      .select(
+        "id, name, gcvs_course_code, student_id, start_date, end_date, grades(id, grade_value, recorded_at, note, percent_complete, missing_assignments)",
+      )
       .eq("student_id", id)
       .order("name", { ascending: true })
       .order("recorded_at", {
@@ -174,7 +185,9 @@ export default async function StudentDetailPage({
       .select("status")
       .eq("student_id", id)
       .gte("date", cutoff),
+    loadPaceContext(),
   ]);
+  const today = easternDateKey(new Date());
 
   const linked: LinkedGuardian[] = (links ?? []).map((row) => {
     const g = row.guardians as unknown as Guardian;
@@ -348,6 +361,21 @@ export default async function StudentDetailPage({
                   const latestValue = latest
                     ? Number(latest.grade_value)
                     : null;
+                  const pace = paceForCourse(
+                    paceContext,
+                    today,
+                    s.schedule_group_id ?? null,
+                    { startDate: course.start_date, endDate: course.end_date },
+                    latest
+                      ? {
+                          percentComplete:
+                            latest.percent_complete == null
+                              ? null
+                              : Number(latest.percent_complete),
+                          missingAssignments: latest.missing_assignments,
+                        }
+                      : null,
+                  );
                   const recordedLabel = latest
                     ? new Date(latest.recorded_at).toLocaleDateString()
                     : "No grade recorded";
@@ -376,13 +404,16 @@ export default async function StudentDetailPage({
                         <p className="text-xs text-muted-foreground">
                           {recordedLabel}
                         </p>
+                        <PaceBar
+                          className="pt-1"
+                          actual={pace.actual}
+                          expected={pace.expected}
+                          paceTone={pace.paceTone}
+                          missing={pace.missing}
+                          missingTone={pace.missingTone}
+                        />
                       </div>
-                      <GradeForm
-                        courseId={course.id}
-                        studentId={s.id}
-                        studentName={studentName(s)}
-                        courseName={course.name}
-                      />
+                      <GradeForm courseId={course.id} />
                     </div>
                   );
                 })}

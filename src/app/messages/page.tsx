@@ -47,6 +47,8 @@ const triggerLabels: Record<string, string> = {
   admin_digest: "Daily digest",
   manual_test: "Test",
   special_day: "Special day",
+  pace_behind: "Behind pace",
+  missing_assignments: "Missing work",
 };
 
 const statusDisplay: Record<NotificationRow["status"], { label: string; tone: StatusTone }> = {

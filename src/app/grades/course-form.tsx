@@ -109,6 +109,20 @@ export function CourseForm({
         </div>
         <SubmitButton />
       </div>
+
+      <div className="grid gap-4 sm:grid-cols-2">
+        <div className="space-y-2">
+          <Label htmlFor="start_date">Course start</Label>
+          <Input id="start_date" name="start_date" type="date" />
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="end_date">Course end</Label>
+          <Input id="end_date" name="end_date" type="date" />
+        </div>
+        <p className="text-xs text-muted-foreground sm:col-span-2">
+          Optional. Leave blank to use the term dates.
+        </p>
+      </div>
     </form>
   );
 }

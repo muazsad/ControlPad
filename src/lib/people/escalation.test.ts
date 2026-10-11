@@ -241,4 +241,82 @@ describe("computeStudentEscalations", () => {
     assert.equal(result.signals.payments.overdueCycles, 1);
     assert.equal(result.signals.payments.maxDaysOverdue, 26);
   });
+
+  it("adds behind-pace and missing-work signals from per-course tones", () => {
+    const settings = {
+      asOfDate: "2026-07-01",
+      gradeFloor: 70,
+      tardiesPerWeek: 3,
+      quranInactivityDays: 7,
+      paymentDueDay: 5,
+    };
+    const quiet = {
+      ...baseStudent,
+      grades: [],
+      attendance: [],
+      quranProgress: [],
+      payments: [],
+      notifications: [],
+    };
+
+    const [onePace] = computeStudentEscalations(
+      [
+        {
+          ...quiet,
+          paceCourses: [
+            { courseId: "a", courseName: "Algebra", paceTone: "warning", missingTone: "success" },
+            { courseId: "b", courseName: "Biology", paceTone: "success", missingTone: "neutral" },
+          ],
+        },
+      ],
+      settings,
+    );
+    assert.equal(onePace.signals.pace.tripped, true);
+    assert.equal(onePace.signals.pace.behindCourses, 1);
+    assert.equal(onePace.signals.pace.score, 1);
+    assert.equal(onePace.signals.missing.tripped, false);
+    assert.equal(onePace.level, "watch");
+
+    const [both] = computeStudentEscalations(
+      [
+        {
+          ...quiet,
+          paceCourses: [
+            { courseId: "a", courseName: "Algebra", paceTone: "danger", missingTone: "danger" },
+          ],
+        },
+      ],
+      settings,
+    );
+    assert.equal(both.signals.pace.score, 2);
+    assert.equal(both.signals.missing.score, 2);
+    assert.equal(both.level, "critical");
+    assert.ok(both.reasons.some((reason) => reason.startsWith("pace:")));
+    assert.ok(both.reasons.some((reason) => reason.startsWith("missing:")));
+  });
+
+  it("keeps pace signals quiet when no pace data is supplied", () => {
+    const [result] = computeStudentEscalations(
+      [
+        {
+          ...baseStudent,
+          grades: [],
+          attendance: [],
+          quranProgress: [],
+          payments: [],
+          notifications: [],
+        },
+      ],
+      {
+        asOfDate: "2026-07-01",
+        gradeFloor: 70,
+        tardiesPerWeek: 3,
+        quranInactivityDays: 7,
+        paymentDueDay: 5,
+      },
+    );
+    assert.equal(result.signals.pace.tripped, false);
+    assert.equal(result.signals.missing.tripped, false);
+    assert.equal(result.level, "ok");
+  });
 });

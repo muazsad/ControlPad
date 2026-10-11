@@ -22,7 +22,8 @@ create type enrollment_status    as enum ('active', 'inactive', 'withdrawn');
 create type attendance_status    as enum ('present', 'tardy', 'absent', 'excused');
 create type payment_status       as enum ('paid', 'unpaid');
 create type notification_trigger as enum ('low_grade','absence','tardy_threshold','quran_slip','payment_overdue','admin_digest',
-                                          'absence_review','manual_test');   -- last two added Oct 2026
+                                          'absence_review','manual_test',    -- added Oct 2026
+                                          'special_day','pace_behind','missing_assignments'); -- pace_* added Oct 12 2026
 create type notification_status  as enum ('queued','sent','failed','dry_run'); -- dry_run added Oct 2026
 ```
 
@@ -226,6 +227,15 @@ create table schedule_group_days (
 --   students.schedule_group_id           uuid references schedule_groups(id) on delete set null
 --   attendance.arrived_at                time   (local arrival time)
 --   settings.parent_alert_delay_minutes  int not null default 60
+
+-- Course pace (20261012000000_course_pace.sql, Oct 12 2026) — additive, existing RLS covers it:
+--   grades.percent_complete              numeric(5,2) null, check 0–100   (GCVS % complete at this snapshot)
+--   grades.missing_assignments           integer null, check >= 0
+--   courses.start_date, courses.end_date date null (per-course window; end >= start)
+--   settings.term_start, settings.term_end  date null (end >= start)
+--   settings.pace_gap_threshold          integer not null default 10 (1–100)
+--   settings.missing_assignments_threshold integer not null default 3 (1–100)
+--   notification_trigger += 'pace_behind', 'missing_assignments'
 ```
 
 ---
@@ -294,6 +304,17 @@ create policy students_parent_read on students
 ## Derived logic (not columns — computed by the app/cron)
 
 - **Current grade** for a course = most recent `grades` row by `recorded_at`.
+- **Latest pace fields** = a snapshot's `percent_complete` / `missing_assignments`. New snapshots carry
+  blank fields forward from the previous one, so the latest row always holds the latest known values
+  (null only if never recorded).
+- **Course window** = the course's `start_date`/`end_date` if both are set, else `settings.term_start`/
+  `term_end`, else none (no pace shown).
+- **Expected percent** = student's expected school days elapsed (today included) ÷ expected days in the
+  window × 100, clamped 0–100. "Expected days" come from `scheduleForDate()` (group days, breaks, special
+  days with `students_expected = false`).
+- **Pace gap** = expected − latest `percent_complete`. Tone: success below `pace_gap_threshold`, warning at
+  or above it, danger at or above 2× (`PACE_DANGER_MULTIPLIER`). Missing assignments use the same bands
+  against `missing_assignments_threshold`.
 - **Grade slipping** = current grade below `settings.grade_floor`, or a downward delta across recent entries.
 - **Weekly tardies** = count of `attendance.status = 'tardy'` over the last 7 school days per student.
 - **Student's day** = their schedule group's row for that weekday (breaks and `no_school` days still

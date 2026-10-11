@@ -16,8 +16,19 @@ const WINDOW_DAYS = 30;
 
 // ── Internal raw types (Supabase nested select shape) ────────────────────────
 
-type RawGrade = { grade_value: number; recorded_at: string };
-type RawCourse = { id: string; name: string; grades: RawGrade[] };
+type RawGrade = {
+  grade_value: number;
+  recorded_at: string;
+  percent_complete: number | string | null;
+  missing_assignments: number | null;
+};
+type RawCourse = {
+  id: string;
+  name: string;
+  start_date: string | null;
+  end_date: string | null;
+  grades: RawGrade[];
+};
 type RawQuranEntry = { date: string; lines_memorized: number };
 type RawAttendance = { status: "present" | "tardy" | "absent" | "excused"; date: string };
 
@@ -27,6 +38,7 @@ type RawStudent = {
   last_name: string;
   grade_level: string | null;
   enrollment_status: EnrollmentStatus;
+  schedule_group_id: string | null;
   courses: RawCourse[];
   quran_progress: RawQuranEntry[];
   attendance: RawAttendance[];
@@ -34,12 +46,24 @@ type RawStudent = {
 
 // ── Public shape ─────────────────────────────────────────────────────────────
 
+/** A course with the pace fields from its latest snapshot (carry-forward keeps these current). */
+export type CourseSnapshot = {
+  courseId: string;
+  courseName: string;
+  startDate: string | null;
+  endDate: string | null;
+  latestPercent: number | null;
+  latestMissing: number | null;
+};
+
 export type StudentMetricsRow = {
   id: string;
   name: string;
   grade_level: string | null;
   enrollment_status: EnrollmentStatus;
   courseCount: number;
+  groupId: string | null;
+  courseSnapshots: CourseSnapshot[];
   /** Latest grade value per course (one entry per course that has ≥1 grade). */
   latestGradeValues: number[];
   quranEntries: RawQuranEntry[];
@@ -57,12 +81,16 @@ export type StudentMetricsRow = {
 // ── Helper ───────────────────────────────────────────────────────────────────
 
 /** Pick the grade with the highest recorded_at for a single course. */
-function latestGradeValue(grades: RawGrade[]): number | null {
+function latestGradeRow(grades: RawGrade[]): RawGrade | null {
   if (grades.length === 0) return null;
-  const latest = grades.reduce((best, g) =>
+  return grades.reduce((best, g) =>
     g.recorded_at > best.recorded_at ? g : best,
   );
-  return Number(latest.grade_value);
+}
+
+function latestGradeValue(grades: RawGrade[]): number | null {
+  const latest = latestGradeRow(grades);
+  return latest ? Number(latest.grade_value) : null;
 }
 
 // ── Main export ──────────────────────────────────────────────────────────────
@@ -87,8 +115,8 @@ export async function getAllStudentMetrics(): Promise<StudentMetricsRow[]> {
   const { data, error } = await supabase
     .from("students")
     .select(
-      `id, first_name, last_name, grade_level, enrollment_status,
-       courses(id, name, grades(grade_value, recorded_at)),
+      `id, first_name, last_name, grade_level, enrollment_status, schedule_group_id,
+       courses(id, name, start_date, end_date, grades(grade_value, recorded_at, percent_complete, missing_assignments)),
        quran_progress(date, lines_memorized),
        attendance(status, date)`,
     )
@@ -124,6 +152,19 @@ export async function getAllStudentMetrics(): Promise<StudentMetricsRow[]> {
       grade_level: s.grade_level,
       enrollment_status: s.enrollment_status,
       courseCount: s.courses.length,
+      groupId: s.schedule_group_id,
+      courseSnapshots: s.courses.map((course): CourseSnapshot => {
+        const latest = latestGradeRow(course.grades);
+        return {
+          courseId: course.id,
+          courseName: course.name,
+          startDate: course.start_date,
+          endDate: course.end_date,
+          latestPercent:
+            latest?.percent_complete == null ? null : Number(latest.percent_complete),
+          latestMissing: latest?.missing_assignments ?? null,
+        };
+      }),
       latestGradeValues,
       quranEntries,
       attendanceRecords,

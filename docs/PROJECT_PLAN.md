@@ -49,7 +49,10 @@ Guiding principle: **catch problems early and notify the right person automatica
 - Courses are **per student** (mirroring their GCVS courses). Classes can be managed from `/grades` or directly from the student profile.
 - Grades are **append-only snapshots** — history is kept so a downward *trend* can be detected, not just an absolute low.
 - `/grades` is a student list; `/grades/[courseId]` shows a course's history.
-- **Alert (event-based):** when a grade is saved below `settings.grade_floor` → SMS (via `checkLowGradeAlert` in `lib/alerts/grades.ts`).
+- **Weekly grade sweep (`/grades/sweep`, admin + moderator; "Weekly sweep" button on `/grades`):** one keyboard-driven table of every course of every *active* student (grouped by student, A–Z) so one teacher can update all current GCVS grades in ~10 minutes. Columns: Student | Course | Last grade (value + date, or "never") | New grade | status chip. Filters (schedule group, name search, "only not updated in the last 7 days") only hide rows — typed values are kept and hidden rows are still saved. Progress line: "X of Y courses updated in the last 7 days" ("last 7 days" = today + the previous 6 **Eastern** days; it comes from server data and changes only after a save). Keys: Enter/Tab/↓ next, Shift+Enter/Shift+Tab/↑ previous, Esc clears; inputs accept 0–100 with one decimal. One **Save sweep** → `saveGradeSweep()` in `app/grades/actions.ts`, which reloads the courses and each course's latest grade itself, then runs `planSweep()` (`lib/grades/sweep.ts`): blanks dropped, values rounded to 1 decimal, unchanged grades skipped (no duplicate snapshot, so `85` = `85.0`), invalid/unknown courses rejected. The rest go in as one batch insert, then `checkLowGradeAlert` runs per inserted grade (failures never fail the save). Unsaved entries are kept as a `localStorage` draft (per user + Eastern date) and a `beforeunload` warning guards the page. Spec: `docs/superpowers/specs/2026-10-11-weekly-grade-sweep-design.md`.
+- **Course pace & missing work (early warning):** each grade snapshot can also carry GCVS **% complete** and **missing assignments** (blank fields carry forward the last known value, so history is never nulled). Pace logic is in `lib/grades/pace.ts`: the course window is the course's own start/end dates (optional override) or the **term dates** (Settings → Term & pace); *expected %* = the student's expected school days elapsed ÷ total in the window (their own group days, breaks and special days — breaks don't inflate it); *gap* = expected − actual; tone is success below `pace_gap_threshold`, warning at it, danger at 2×. The sweep grid, the single-course form and the student-profile editor all take the two fields; a snapshot is inserted if any of grade / % / missing changed, and the low-grade alert runs only when the grade itself changed. `/grades/[courseId]` charts actual vs expected pace and edits the course dates; the student profile shows a pace bar and missing count per course; `/grades` shows a per-student Pace badge.
+- **Pace alerts (event-based, on save):** `pace_behind` when a saved snapshot puts the gap at or above the threshold, `missing_assignments` when missing ≥ `missing_assignments_threshold` → parent(s) + admin via `lib/alerts/pace.ts`, deduped per course per ISO week. No cron: the dashboard and digest compute pace live. A sweep that re-types an unchanged % creates no snapshot and so no text (the dashboard still lists the course).
+- **Alert (event-based):** when a grade is saved below `settings.grade_floor` → SMS (via `checkLowGradeAlert` in `lib/alerts/grades.ts`). Applies to single saves and to every grade inserted by the sweep.
 
 ### 3.3 Attendance & schedule groups
 - **Schedule groups** (e.g. *Full time*, *Quran only*): each student belongs to one. A group sets, per weekday, whether it attends, its **start time**, **tardy grace** (minutes), and **absence check** time. Students without a group use the school-wide weekly pattern + `settings.school_start`. Breaks and no-school days apply to everyone; grouped students keep their own times on half days. Managed in Settings (admin).
@@ -77,12 +80,12 @@ Guiding principle: **catch problems early and notify the right person automatica
 - **Modes** (`SMS_MODE` env): `off` (log only, status `dry_run` — the default until Twilio keys exist), `test` (every text goes to `SMS_TEST_NUMBER`, prefixed with the intended recipient), `live`.
 - **Messages page (`/messages`, admin):** texting status, a "send me a test text" button, and the log of every message sent or that would have been sent.
 - Before sending, alerts check `notifications` to avoid duplicates (same recipient + student + trigger in the window, or an explicit `dedupe_key` for batched admin texts).
-- Trigger types: `low_grade`, `absence`, `absence_review`, `tardy_threshold`, `quran_slip`, `payment_overdue`, `admin_digest`, `manual_test`.
+- Trigger types: `low_grade`, `absence`, `absence_review`, `tardy_threshold`, `quran_slip`, `payment_overdue`, `admin_digest`, `manual_test`, `pace_behind`, `missing_assignments`.
 - **Not yet live:** a Twilio number needs to be bought and A2P 10DLC-registered (`docs/SETUP.md` §3).
 
 ### 3.7 Admin dashboard, daily digest & escalation
-- **Dashboard (`/`)**: summary cards and today's problems — absences/tardies, low or dropping grades, Quran slippage, overdue payments — with severity ordering (`lib/alerts/admin-dashboard-severity.ts`).
-- **Critical students escalation**: scores each student over a rolling 30-day window across grades, attendance, Quran, and payments → `ok` / `watch` / `critical`. Logic in `lib/people/escalation.ts` (all tunable constants at the top of that file).
+- **Dashboard (`/`)**: summary cards and today's problems — absences/tardies, low or dropping grades, **behind pace**, **missing work**, Quran slippage, overdue payments — with severity ordering (`lib/alerts/admin-dashboard-severity.ts`).
+- **Critical students escalation**: scores each student over a rolling 30-day window across grades, attendance, Quran, payments, and (from each course's latest snapshot) behind-pace and missing-work → `ok` / `watch` / `critical`. Logic in `lib/people/escalation.ts` (all tunable constants at the top of that file).
 - **Daily digest**: SMS summary to admin(s) at `settings.admin_digest_time` (Eastern), triggered by the 10-minute attendance tick; skipped on no-school days. `/api/cron/admin-digest` supports `?force=1` and `?date=YYYY-MM-DD` for manual runs.
 - Parents see a simplified "My children" dashboard instead.
 
@@ -99,6 +102,9 @@ Thresholds — all read from the single-row `settings` table, never hardcoded:
 | Payment due day of month | 5th |
 | School start (ungrouped students only) | 8:00am |
 | Admin digest time | 3:00pm |
+| Term start / end | blank (pace is off for courses without their own dates) |
+| Pace gap threshold | 10 points |
+| Missing assignments threshold | 3 |
 
 Schedule groups: see §3.3. Seeded with **Full time** (from the school-wide pattern and start time); all existing students were assigned to it.
 
@@ -155,6 +161,7 @@ Full schema in `DATA_MODEL.md` and `supabase/migrations/`:
 | `20261010000000_schedule_groups.sql` | `schedule_groups`, `schedule_group_days`; `students.schedule_group_id`, `attendance.arrived_at`, `settings.parent_alert_delay_minutes`, `notifications.dedupe_key/delivery_mode`; new enum values; seeds **Full time** and assigns all students |
 | `20261010000100_attendance_tick_scheduler.sql` | Enables `pg_cron` + `pg_net`; schedules the 10-minute attendance tick (reads URL + secret from Vault) |
 | `20261011000000_special_day_options.sql` | More special-day types; `students_expected`, `send_attendance_alerts`, `applies_to`, `parent_message`, `notify_parents`, `parents_notified_at`; `special_day` notification trigger. Existing half days scoped to ungrouped students (unchanged behavior) |
+| `20261012000000_course_pace.sql` | `grades.percent_complete` / `missing_assignments`; `courses.start_date` / `end_date`; `settings.term_start` / `term_end` / `pace_gap_threshold` / `missing_assignments_threshold`; `pace_behind` and `missing_assignments` notification triggers. Additive; no RLS changes. **Must be applied (`supabase db push`) before this code is deployed.** |
 
 Core tables: `profiles` (role), `students`, `guardians`, `student_guardians`, `courses`, `grades`, `attendance`, `quran_progress`, `payments`, `settings` (single row), `notifications`, the three calendar tables, and `schedule_groups` + `schedule_group_days`.
 
@@ -178,6 +185,8 @@ src/
   lib/sms/                send-sms.ts — the only Twilio path
   lib/alerts/             grades, attendance (tardy threshold), attendance-escalation (tick),
                           quran, payment, payment-overdue, admin-digest, admin-dashboard-severity
+  lib/grades/             sweep (pure parse/plan/Eastern-window logic), sweep-data (latest snapshot per course),
+                          pace (pure expected-pace logic), pace-data (term/thresholds/calendar loader)
   lib/people/             performance, student-metrics, escalation, quran-progress, people
   lib/schedule/           calendar.ts + student-schedule.ts (pure logic), calendar-data.ts +
                           schedule-groups-data.ts (DB loading), schedule-group-validation.ts
@@ -246,6 +255,8 @@ ControlPad holds **children's educational records and family phone numbers**:
 - Oct 10: tardy threshold counts each student's own last 7 expected days (group-aware); Quran check moved onto the 10-minute tick at 11:00 Eastern
 - Oct 10: dashboard + digest show students not checked in (past their tardy cutoff)
 - Oct 10: special days — more types (schedule change, no GCVS, field trip, other), per-day options (students expected, new times, parent attendance texts on/off), group scope, and a parent text (auto 6pm the evening before and/or "Text parents now")
+- Oct 12: course pace — GCVS % complete and missing assignments on every snapshot, expected-pace calculation from the student's own school days, pace/missing alerts (parents + admin), dashboard and digest items, escalation signals, pace chart and bars (§3.2)
+- Oct 11: weekly grade sweep (`/grades/sweep`) — keyboard-driven bulk update of every active student's current grade per course, with unchanged-skip, draft recovery, and the normal low-grade alert (§3.2)
 
 ---
 

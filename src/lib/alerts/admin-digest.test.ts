@@ -6,11 +6,13 @@ import {
   formatAdminDigestSms,
   sendAdminDigest,
   summarizeGradeIssues,
+  summarizePaceIssues,
   type AdminDigestDatabase,
   type AdminDailySummary,
 } from "./admin-digest";
 import type { SendSmsInput } from "@/lib/sms/send-sms";
 import { DEFAULT_WEEKLY_PATTERN } from "@/lib/schedule/calendar";
+import type { PaceContext } from "@/lib/grades/pace";
 
 const emptySummary: AdminDailySummary = {
   date: "2026-06-27",
@@ -20,12 +22,16 @@ const emptySummary: AdminDailySummary = {
     gradeFloor: 70,
     quranInactivityDays: 7,
     paymentDueDay: 5,
+    paceGapThreshold: 10,
+    missingAssignmentsThreshold: 3,
   },
   absences: [],
   tardies: [],
   unmarked: [],
   lowGrades: [],
   droppingGrades: [],
+  behindPace: [],
+  missingWork: [],
   quranSlippage: [],
   overduePayments: [],
 };
@@ -322,5 +328,90 @@ describe("findUnmarkedStudents", () => {
     });
     assert.match(body, /Not checked in 1/);
     assert.match(body, /Amina Noor/);
+  });
+});
+
+describe("summarizePaceIssues", () => {
+  // Term Mon Oct 5 – Sun Oct 18 2026; on Oct 12 the expected pace is 60%.
+  const context: PaceContext = {
+    term: { termStart: "2026-10-05", termEnd: "2026-10-18" },
+    paceGapThreshold: 10,
+    missingAssignmentsThreshold: 3,
+    calendar: { weeklyPattern: DEFAULT_WEEKLY_PATTERN, breaks: [], specialDays: [] },
+    groups: new Map(),
+    defaults: { schoolStart: "08:00", tardyWindowHours: 2 },
+  };
+
+  function row(
+    courseId: string,
+    studentId: string,
+    percent: number | null,
+    missing: number | null,
+    recordedAt = "2026-10-11T10:00:00.000Z",
+  ) {
+    return {
+      course_id: courseId,
+      grade_value: 80,
+      percent_complete: percent,
+      missing_assignments: missing,
+      recorded_at: recordedAt,
+      courses: { id: courseId, name: courseId, start_date: null, end_date: null },
+      students: { id: studentId, first_name: "Student", last_name: studentId },
+    };
+  }
+
+  it("flags behind-pace and missing-work courses, most severe first", () => {
+    const result = summarizePaceIssues({
+      gradeRows: [
+        row("a", "s1", 45, 0), // gap 15 → warning
+        row("b", "s2", 30, 6), // gap 30 → danger; 6 missing → danger
+        row("c", "s3", 58, 3), // gap 2 → fine; 3 missing → warning
+      ],
+      students: [
+        { id: "s1", groupId: null },
+        { id: "s2", groupId: null },
+        { id: "s3", groupId: null },
+      ],
+      context,
+      today: "2026-10-12",
+    });
+    assert.deepEqual(
+      result.behindPace.map((issue) => [issue.courseId, issue.tone]),
+      [
+        ["b", "danger"],
+        ["a", "warning"],
+      ],
+    );
+    assert.deepEqual(
+      result.missingWork.map((issue) => [issue.courseId, issue.tone]),
+      [
+        ["b", "danger"],
+        ["c", "warning"],
+      ],
+    );
+  });
+
+  it("uses only each course's latest snapshot and skips inactive students", () => {
+    const result = summarizePaceIssues({
+      gradeRows: [
+        row("a", "s1", 58, 0, "2026-10-11T10:00:00.000Z"), // latest: fine
+        row("a", "s1", 10, 9, "2026-10-04T10:00:00.000Z"), // older: ignored
+        row("z", "gone", 5, 9),
+      ],
+      students: [{ id: "s1", groupId: null }],
+      context,
+      today: "2026-10-12",
+    });
+    assert.deepEqual(result, { behindPace: [], missingWork: [] });
+  });
+
+  it("ignores courses with no pace data", () => {
+    const result = summarizePaceIssues({
+      gradeRows: [row("a", "s1", null, null)],
+      students: [{ id: "s1", groupId: null }],
+      context,
+      today: "2026-10-12",
+    });
+    assert.deepEqual(result, { behindPace: [], missingWork: [] });
   });
 });

@@ -7,6 +7,10 @@ export type SettingsValues = {
   school_start: string;
   admin_digest_time: string;
   parent_alert_delay_minutes: number;
+  term_start: string | null;
+  term_end: string | null;
+  pace_gap_threshold: number;
+  missing_assignments_threshold: number;
 };
 
 export type SettingsParseResult =
@@ -62,6 +66,19 @@ function timeValue(
     return { ok: false, error: `${label} must use HH:MM format.` };
   }
 
+  return raw;
+}
+
+function optionalDate(
+  formData: FormData,
+  key: keyof SettingsValues,
+  label: string,
+): SettingsParseResult | string | null {
+  const raw = text(formData, key);
+  if (raw === "") return null;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(raw) || Number.isNaN(Date.parse(raw))) {
+    return { ok: false, error: `${label} must be a valid date.` };
+  }
   return raw;
 }
 
@@ -130,6 +147,40 @@ export function parseSettingsForm(formData: FormData): SettingsParseResult {
   );
   if (typeof adminDigestTime !== "string") return adminDigestTime;
 
+  const paceGapThreshold = integerInRange(
+    formData,
+    "pace_gap_threshold",
+    "Pace gap threshold",
+    1,
+    100,
+  );
+  if (typeof paceGapThreshold !== "number") return paceGapThreshold;
+
+  const missingAssignmentsThreshold = integerInRange(
+    formData,
+    "missing_assignments_threshold",
+    "Missing assignments threshold",
+    1,
+    100,
+  );
+  if (typeof missingAssignmentsThreshold !== "number") {
+    return missingAssignmentsThreshold;
+  }
+
+  const termStart = optionalDate(formData, "term_start", "Term start");
+  if (termStart !== null && typeof termStart !== "string") return termStart;
+  const termEnd = optionalDate(formData, "term_end", "Term end");
+  if (termEnd !== null && typeof termEnd !== "string") return termEnd;
+  if ((termStart === null) !== (termEnd === null)) {
+    return {
+      ok: false,
+      error: "Set both term start and term end, or leave both blank.",
+    };
+  }
+  if (termStart !== null && termEnd !== null && termEnd < termStart) {
+    return { ok: false, error: "Term end must be on or after term start." };
+  }
+
   return {
     ok: true,
     values: {
@@ -141,6 +192,10 @@ export function parseSettingsForm(formData: FormData): SettingsParseResult {
       school_start: schoolStart,
       admin_digest_time: adminDigestTime,
       parent_alert_delay_minutes: parentAlertDelayMinutes,
+      term_start: termStart,
+      term_end: termEnd,
+      pace_gap_threshold: paceGapThreshold,
+      missing_assignments_threshold: missingAssignmentsThreshold,
     },
   };
 }

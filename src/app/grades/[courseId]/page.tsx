@@ -9,32 +9,93 @@ import { PageHeader } from "@/components/controlpad/page-header";
 import { StatusBadge } from "@/components/controlpad/status-badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { PaceBar } from "@/components/controlpad/pace-bar";
 import { getCurrentProfile } from "@/lib/auth/current-profile";
+import {
+  courseWindow,
+  expectedDayPredicate,
+  expectedPercent,
+  paceForCourse,
+} from "@/lib/grades/pace";
+import { loadPaceContext } from "@/lib/grades/pace-data";
+import { easternDateKey } from "@/lib/grades/sweep";
 import { studentName } from "@/lib/people/people";
 import { createClient } from "@/lib/supabase/server";
 
 import { formatGrade, gradeTone } from "../grade-display";
 import { GradeForm } from "../grade-form";
+import { CourseDatesForm } from "./course-dates-form";
+import { PaceChart, type PacePoint } from "./pace-chart";
 
 type CourseDetail = {
   id: string;
   name: string;
   gcvs_course_code: string | null;
   student_id: string;
+  start_date: string | null;
+  end_date: string | null;
   students: {
     id: string;
     first_name: string;
     last_name: string;
     grade_level: string | null;
+    schedule_group_id: string | null;
   };
 };
 
 type GradeRow = {
   id: string;
   grade_value: number;
+  percent_complete: number | null;
+  missing_assignments: number | null;
   note: string | null;
   recorded_at: string;
 };
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+const CHART_STEP_DAYS = 7;
+
+function dateMs(date: string) {
+  return new Date(`${date}T00:00:00.000Z`).getTime();
+}
+
+/** Expected-pace line (weekly points, plus today) merged with actual snapshots. */
+function buildPacePoints(input: {
+  window: { start: string; end: string } | null;
+  today: string;
+  isExpectedDay: (date: string) => boolean;
+  snapshots: { date: string; percent: number | null }[];
+}): PacePoint[] {
+  const { window } = input;
+  if (!window) return [];
+  const byTime = new Map<number, PacePoint>();
+  const point = (t: number) => {
+    const existing = byTime.get(t) ?? { t };
+    byTime.set(t, existing);
+    return existing;
+  };
+
+  const expectedAt = (date: string) =>
+    expectedPercent(window, date, input.isExpectedDay) ?? undefined;
+  const end = dateMs(window.end);
+  for (let t = dateMs(window.start); t < end; t += CHART_STEP_DAYS * DAY_MS) {
+    point(t).expected = expectedAt(new Date(t).toISOString().slice(0, 10));
+  }
+  point(end).expected = expectedAt(window.end);
+  const todayMs = dateMs(input.today);
+  if (todayMs >= dateMs(window.start) && todayMs <= end) {
+    point(todayMs).expected = expectedAt(input.today);
+  }
+  for (const snapshot of input.snapshots) {
+    if (snapshot.percent === null) continue;
+    const t = dateMs(snapshot.date);
+    const p = point(t);
+    p.expected ??= expectedAt(snapshot.date);
+    // Newest snapshot wins when several land on one day (grades are newest-first).
+    p.actual ??= snapshot.percent;
+  }
+  return [...byTime.values()].sort((a, b) => a.t - b.t);
+}
 
 export default async function CourseGradesPage({
   params,
@@ -50,21 +111,23 @@ export default async function CourseGradesPage({
     { data: course },
     { data: gradeData, error: gradesError },
     { data: settingsData },
+    paceContext,
   ] =
     await Promise.all([
       supabase
         .from("courses")
         .select(
-          "id, name, gcvs_course_code, student_id, students(id, first_name, last_name, grade_level)",
+          "id, name, gcvs_course_code, student_id, start_date, end_date, students(id, first_name, last_name, grade_level, schedule_group_id)",
         )
         .eq("id", courseId)
         .maybeSingle(),
       supabase
         .from("grades")
-        .select("id, grade_value, note, recorded_at")
+        .select("id, grade_value, percent_complete, missing_assignments, note, recorded_at")
         .eq("course_id", courseId)
         .order("recorded_at", { ascending: false }),
       supabase.from("settings").select("grade_floor").eq("id", 1).single(),
+      loadPaceContext(),
     ]);
 
   if (!course) notFound();
@@ -75,6 +138,38 @@ export default async function CourseGradesPage({
   const displayStudentName = studentName(c.students);
   const gradeFloor =
     settingsData?.grade_floor == null ? null : Number(settingsData.grade_floor);
+
+  // Pace: latest snapshot vs. where the student should be today.
+  const today = easternDateKey(new Date());
+  const courseDates = { startDate: c.start_date, endDate: c.end_date };
+  const pace = paceForCourse(
+    paceContext,
+    today,
+    c.students.schedule_group_id,
+    courseDates,
+    latest
+      ? {
+          percentComplete:
+            latest.percent_complete == null ? null : Number(latest.percent_complete),
+          missingAssignments: latest.missing_assignments,
+        }
+      : null,
+  );
+  const chartPoints = buildPacePoints({
+    window: courseWindow(courseDates, paceContext.term),
+    today,
+    isExpectedDay: expectedDayPredicate(
+      c.students.schedule_group_id
+        ? (paceContext.groups.get(c.students.schedule_group_id) ?? null)
+        : null,
+      paceContext.calendar,
+      paceContext.defaults,
+    ),
+    snapshots: grades.map((grade) => ({
+      date: easternDateKey(new Date(grade.recorded_at)),
+      percent: grade.percent_complete == null ? null : Number(grade.percent_complete),
+    })),
+  });
 
   return (
     <AppShell fullName={profile.fullName} role={profile.role}>
@@ -109,15 +204,49 @@ export default async function CourseGradesPage({
               <CardTitle>Record grade</CardTitle>
             </CardHeader>
             <CardContent>
-              <GradeForm
-                courseId={c.id}
-                studentId={c.student_id}
-                studentName={displayStudentName}
-                courseName={c.name}
-              />
+              <GradeForm courseId={c.id} />
             </CardContent>
           </Card>
         ) : null}
+
+        <Card className="border shadow-sm">
+          <CardHeader>
+            <CardTitle>Pace</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <PaceBar
+              actual={pace.actual}
+              expected={pace.expected}
+              paceTone={pace.paceTone}
+              missing={pace.missing}
+              missingTone={pace.missingTone}
+            />
+            {pace.window ? (
+              chartPoints.some((point) => point.actual !== undefined) ? (
+                <PaceChart points={chartPoints} />
+              ) : (
+                <p className="text-sm text-muted-foreground">
+                  Record a % complete to chart it against the expected pace.
+                </p>
+              )
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                No course or term dates are set, so expected pace can&apos;t be
+                worked out.{canManage ? " Set course dates below or the term in Settings." : ""}
+              </p>
+            )}
+            {canManage ? (
+              <div className="rounded-lg border bg-muted/25 p-4">
+                <p className="mb-3 text-sm font-medium">Course dates</p>
+                <CourseDatesForm
+                  courseId={c.id}
+                  startDate={c.start_date}
+                  endDate={c.end_date}
+                />
+              </div>
+            ) : null}
+          </CardContent>
+        </Card>
 
         <Card className="border shadow-sm">
           <CardHeader>
@@ -155,6 +284,19 @@ export default async function CourseGradesPage({
                         tone={gradeTone(Number(row.grade_value), gradeFloor)}
                       />
                     ),
+                  },
+                  {
+                    key: "percent",
+                    header: "% complete",
+                    cell: (row) =>
+                      row.percent_complete == null
+                        ? "—"
+                        : `${Number(row.percent_complete)}%`,
+                  },
+                  {
+                    key: "missing",
+                    header: "Missing",
+                    cell: (row) => row.missing_assignments ?? "—",
                   },
                   {
                     key: "recorded",
