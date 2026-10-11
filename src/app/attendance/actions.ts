@@ -2,6 +2,11 @@
 
 import { revalidatePath } from "next/cache";
 
+import {
+  attendanceForDecision,
+  parseReviewDecision,
+  reportNote,
+} from "@/lib/absence-reports/review";
 import { schoolClock } from "@/lib/alerts/attendance-escalation";
 import { requireRole } from "@/lib/auth/current-profile";
 import { getSchoolCalendar } from "@/lib/schedule/calendar-data";
@@ -123,5 +128,68 @@ export async function markAttendance(
   if (error) return { error: error.message };
 
   revalidatePath("/attendance");
+  return { error: null, saved: true };
+}
+
+/** Admin decision on a parent-reported absence (excused / unexcused / dismissed). */
+export async function reviewAbsenceReport(
+  _prev: AttendanceActionState,
+  form: FormData,
+): Promise<AttendanceActionState> {
+  const profile = await requireRole(["admin"]);
+
+  const reportId = text(form, "report_id");
+  const decision = parseReviewDecision(text(form, "decision"));
+  if (!reportId) return { error: "Missing report reference." };
+  if (!decision) return { error: "Choose excused, unexcused, or dismiss." };
+
+  const supabase = await createClient();
+  const { data: report, error: reportError } = await supabase
+    .from("absence_reports")
+    .select("id, student_id, date, reason, status")
+    .eq("id", reportId)
+    .single();
+  if (reportError) return { error: reportError.message };
+  if (report.status !== "pending") return { error: "This report was already reviewed." };
+
+  const { data: existing, error: existingError } = await supabase
+    .from("attendance")
+    .select("status")
+    .eq("student_id", report.student_id)
+    .eq("date", report.date)
+    .maybeSingle();
+  if (existingError) return { error: existingError.message };
+
+  const outcome = attendanceForDecision(
+    decision,
+    (existing?.status as AttendanceStatus | undefined) ?? null,
+  );
+  if ("error" in outcome) return { error: outcome.error };
+
+  const now = new Date().toISOString();
+  if (outcome.status) {
+    const { error } = await supabase.from("attendance").upsert(
+      {
+        student_id: report.student_id,
+        date: report.date,
+        status: outcome.status,
+        arrived_at: null,
+        note: reportNote(report.reason as string | null),
+        recorded_by: profile.id,
+        recorded_at: now,
+      },
+      { onConflict: "student_id,date" },
+    );
+    if (error) return { error: error.message };
+  }
+
+  const { error: updateError } = await supabase
+    .from("absence_reports")
+    .update({ status: decision, reviewed_by: profile.id, reviewed_at: now })
+    .eq("id", reportId);
+  if (updateError) return { error: updateError.message };
+
+  revalidatePath("/attendance");
+  revalidatePath("/");
   return { error: null, saved: true };
 }

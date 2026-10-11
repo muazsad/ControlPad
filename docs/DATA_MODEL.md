@@ -226,6 +226,39 @@ create table schedule_group_days (
 --   students.schedule_group_id           uuid references schedule_groups(id) on delete set null
 --   attendance.arrived_at                time   (local arrival time)
 --   settings.parent_alert_delay_minutes  int not null default 60
+
+-- Parent-reported absences (Oct 2026). Written by the server from the Twilio
+-- webhook; admins review reports on /attendance.
+create table inbound_messages (
+  id              uuid primary key default gen_random_uuid(),
+  from_phone      text not null,
+  body            text not null,
+  twilio_sid      text unique,            -- null for simulated texts
+  guardian_id     uuid references guardians(id) on delete set null,
+  outcome         text not null,          -- 'absence_report' | 'needs_child' | 'forwarded' | 'ignored'
+  pending_date    date,                   -- needs_child: waiting for the parent to name a child
+  pending_reason  text,
+  resolved_at     timestamptz,
+  simulated       boolean not null default false,
+  created_at      timestamptz not null default now()
+);
+
+create type absence_report_status as enum ('pending','excused','unexcused','dismissed');
+
+create table absence_reports (
+  id                  uuid primary key default gen_random_uuid(),
+  student_id          uuid not null references students(id) on delete cascade,
+  guardian_id         uuid references guardians(id) on delete set null,
+  inbound_message_id  uuid references inbound_messages(id) on delete set null,
+  date                date not null,
+  reason              text,
+  status              absence_report_status not null default 'pending',
+  reviewed_by         uuid references auth.users(id),
+  reviewed_at         timestamptz,
+  created_at          timestamptz not null default now(),
+  updated_at          timestamptz not null default now(),
+  unique (student_id, date)
+);
 ```
 
 ---
@@ -254,6 +287,8 @@ as $$ select role from public.profiles where id = auth.uid() $$;
 | school_weekly_patterns, school_breaks, school_special_days | full | read | read |
 | schedule_groups, schedule_group_days | full | read | read |
 | notifications | full | read | read **own** |
+| inbound_messages | read (writes: server only) | none | none |
+| absence_reports | full | read | none |
 
 **Parent "own children" check** (reusable predicate):
 

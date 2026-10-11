@@ -77,8 +77,19 @@ Guiding principle: **catch problems early and notify the right person automatica
 - **Modes** (`SMS_MODE` env): `off` (log only, status `dry_run` — the default until Twilio keys exist), `test` (every text goes to `SMS_TEST_NUMBER`, prefixed with the intended recipient), `live`.
 - **Messages page (`/messages`, admin):** texting status, a "send me a test text" button, and the log of every message sent or that would have been sent.
 - Before sending, alerts check `notifications` to avoid duplicates (same recipient + student + trigger in the window, or an explicit `dedupe_key` for batched admin texts).
-- Trigger types: `low_grade`, `absence`, `absence_review`, `tardy_threshold`, `quran_slip`, `payment_overdue`, `admin_digest`, `manual_test`.
+- Trigger types: `low_grade`, `absence`, `absence_review`, `tardy_threshold`, `quran_slip`, `payment_overdue`, `admin_digest`, `manual_test`, `special_day`, `absence_report_reply`, `parent_message`.
 - **Not yet live:** a Twilio number needs to be bought and A2P 10DLC-registered (`docs/SETUP.md` §3).
+
+### 3.6a Parent-reported absences (incoming texts)
+- Parents text the school number (e.g. "Amina sick today"). Twilio posts to `/api/sms/inbound` (signature-checked); `handleInboundSms()` in `lib/absence-reports/inbound.ts` logs it to `inbound_messages` and decides (pure logic in `lib/absence-reports/parse.ts`):
+  - **Absence** (sick, absent, not coming, appointment, …) for a clear child (only child, named, or "both/all") → `absence_reports` row (one per student per date), status **pending**; parent gets an acknowledgement. Date: "tomorrow" / "today"; with neither, today — or tomorrow if sent after 6 PM Eastern.
+  - Absence but several children and none named → parent is asked which child; a reply within 2 hours completes it.
+  - Anything else (thanks, running late, questions, unknown numbers) → **forwarded to admin** by SMS.
+  - STOP/START/HELP → logged only (Twilio handles them).
+- **Admin approval:** `/attendance` lists pending reports with **Excuse** (attendance → excused), **Unexcused absence** (→ absent), **Dismiss**. Refused if the student was already marked present/tardy. Moderators see reports read-only. The dashboard shows how many are waiting.
+- **Alerts:** a student with a pending or unexcused report is listed in the admin absence-check text as "(parent reported)" but the parent gets **no** "not checked in" text.
+- `/messages` shows incoming texts and has an admin **Simulate text** box (same code path) for testing before Twilio is live. Replies follow `SMS_MODE` like every other text.
+- Spec: `docs/superpowers/specs/2026-10-11-parent-absence-reports-design.md`.
 
 ### 3.7 Admin dashboard, daily digest & escalation
 - **Dashboard (`/`)**: summary cards and today's problems — absences/tardies, low or dropping grades, Quran slippage, overdue payments — with severity ordering (`lib/alerts/admin-dashboard-severity.ts`).
@@ -155,6 +166,7 @@ Full schema in `DATA_MODEL.md` and `supabase/migrations/`:
 | `20261010000000_schedule_groups.sql` | `schedule_groups`, `schedule_group_days`; `students.schedule_group_id`, `attendance.arrived_at`, `settings.parent_alert_delay_minutes`, `notifications.dedupe_key/delivery_mode`; new enum values; seeds **Full time** and assigns all students |
 | `20261010000100_attendance_tick_scheduler.sql` | Enables `pg_cron` + `pg_net`; schedules the 10-minute attendance tick (reads URL + secret from Vault) |
 | `20261011000000_special_day_options.sql` | More special-day types; `students_expected`, `send_attendance_alerts`, `applies_to`, `parent_message`, `notify_parents`, `parents_notified_at`; `special_day` notification trigger. Existing half days scoped to ungrouped students (unchanged behavior) |
+| `20261012000000_parent_absence_reports.sql` | `inbound_messages`, `absence_reports` (+ `absence_report_status` enum), RLS (admin; moderator read reports), triggers `absence_report_reply`, `parent_message` |
 
 Core tables: `profiles` (role), `students`, `guardians`, `student_guardians`, `courses`, `grades`, `attendance`, `quran_progress`, `payments`, `settings` (single row), `notifications`, the three calendar tables, and `schedule_groups` + `schedule_group_days`.
 
@@ -176,6 +188,9 @@ src/
   lib/supabase/           server.ts, client.ts, middleware.ts
   lib/auth/               current-profile.ts (requireRole), admin-accounts.ts
   lib/sms/                send-sms.ts — the only Twilio path
+  lib/absence-reports/    parse.ts (pure: is it an absence, which child, which day), inbound.ts
+                          (handleInboundSms), review.ts, reports-data.ts
+  app/api/sms/inbound/    Twilio incoming-text webhook (signature-checked, public path)
   lib/alerts/             grades, attendance (tardy threshold), attendance-escalation (tick),
                           quran, payment, payment-overdue, admin-digest, admin-dashboard-severity
   lib/people/             performance, student-metrics, escalation, quran-progress, people
@@ -245,6 +260,7 @@ ControlPad holds **children's educational records and family phone numbers**:
 - Oct 10: SMS dedupe fixed (dry runs/failed sends don't block real alerts; test-mode texts don't block live; failed sends retried max 3×)
 - Oct 10: tardy threshold counts each student's own last 7 expected days (group-aware); Quran check moved onto the 10-minute tick at 11:00 Eastern
 - Oct 10: dashboard + digest show students not checked in (past their tardy cutoff)
+- Oct 11: parent-reported absences by text — inbound Twilio webhook, absence reports with admin approval, forwarding of other parent texts, simulator on /messages (§3.6a)
 - Oct 10: special days — more types (schedule change, no GCVS, field trip, other), per-day options (students expected, new times, parent attendance texts on/off), group scope, and a parent text (auto 6pm the evening before and/or "Text parents now")
 
 ---
@@ -260,7 +276,8 @@ ControlPad holds **children's educational records and family phone numbers**:
 - **No code work is blocking go-live.** What's left is owner setup (below). Feature ideas are under **Later**.
 
 **Still to do:**
-1. **Twilio**: buy a number and complete A2P 10DLC registration (or toll-free verification), then `SMS_MODE=test` → `live`. Needs the school's legal name + EIN, a live website with privacy policy and terms pages, a non-Gmail contact email, and a parent opt-in (consent) line on enrollment. Details in `docs/SETUP.md` §3.
+0. **Apply `20261012000000_parent_absence_reports.sql`** (`supabase db push`) once the `feature/parent-absence-reports` branch is merged. Until it's applied the app keeps working (reports/incoming texts just don't show).
+1. **Twilio**: buy a number and complete A2P 10DLC registration (or toll-free verification), then `SMS_MODE=test` → `live`. Needs the school's legal name + EIN, a live website with privacy policy and terms pages, a non-Gmail contact email, and a parent opt-in (consent) line on enrollment. Details in `docs/SETUP.md` §3. Also point the number's incoming-message webhook at `/api/sms/inbound` (SETUP §3 step 6).
 2. ~~**Apply the special-days migration**~~ — done Oct 10 (`20261011000000_special_day_options.sql` applied; special days verified in production).
 3. ~~**Dedupe should ignore dry runs** (and failed sends)~~ — done Oct 10. See `decideDedupe()` in `lib/sms/send-sms.ts`: only `queued`/`sent` rows *from the same SMS mode* block a repeat (test-mode texts don't block live ones); dry runs only block other dry runs while texting is off; failed sends are retried up to `MAX_FAILED_SEND_ATTEMPTS` (3) per dedupe window.
 4. **Delete seed/test students** and their fake guardian phones before going live.
@@ -276,7 +293,6 @@ ControlPad holds **children's educational records and family phone numbers**:
 **Later:**
 - Stripe online tuition payments
 - Richer parent portal
-- **Parent-reported absences** — a parent texts in (e.g. "Amina sick today") and the student is marked excused before the absence alert goes out.
 - **Weekly parent summary** — one text per student each weekend covering grades, attendance and Quran progress (good news as well as warnings).
 - **Report cards** — a per-student, per-term PDF built from existing grades, attendance and Quran data.
 - **Staff accountability** — show which teachers haven't taken attendance or logged Quran today.

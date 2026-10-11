@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { CalendarDays, Search } from "lucide-react";
 
+import { AbsenceReportReview } from "@/app/attendance/absence-report-review";
 import { AttendanceRowForm } from "@/app/attendance/attendance-row-form";
 import type { AttendanceStatus } from "@/app/attendance/actions";
 import { AppShell } from "@/components/controlpad/app-shell";
@@ -9,9 +10,21 @@ import { EmptyState } from "@/components/controlpad/empty-state";
 import { PageHeader } from "@/components/controlpad/page-header";
 import { StatusBadge } from "@/components/controlpad/status-badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { friendlyDate } from "@/lib/absence-reports/parse";
+import {
+  getAbsenceReportsForDate,
+  getPendingAbsenceReports,
+  type AbsenceReport,
+} from "@/lib/absence-reports/reports-data";
 import { schoolClock } from "@/lib/alerts/attendance-escalation";
 import { getCurrentProfile } from "@/lib/auth/current-profile";
 import { studentName, type Student } from "@/lib/people/people";
@@ -86,6 +99,12 @@ export default async function AttendancePage({
     tardyWindowHours: Number(settingsData?.tardy_window_hours ?? 2),
   };
   const groupsById = new Map(groups.map((group) => [group.id, group]));
+  const [pendingReports, reportsForDate] = canManage
+    ? await Promise.all([
+        getPendingAbsenceReports(),
+        getAbsenceReportsForDate(selectedDate),
+      ])
+    : [[] as AbsenceReport[], new Map<string, AbsenceReport>()];
 
   const { data: studentData, error: studentError } = await supabase
     .from("students")
@@ -184,6 +203,50 @@ export default async function AttendancePage({
           </CardContent>
         </Card>
 
+        {canManage && pendingReports.length > 0 ? (
+          <Card className="border border-status-warning/30 shadow-sm">
+            <CardHeader>
+              <CardTitle>Parent-reported absences</CardTitle>
+              <CardDescription>
+                {profile.role === "admin"
+                  ? "Parents texted that these students will be out. Parents won't get the “not checked in” text while a report is pending."
+                  : "Parents texted that these students will be out. The admin reviews each report."}
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="divide-y">
+              {pendingReports.map((report) => (
+                <div
+                  key={report.id}
+                  className="flex flex-col gap-3 py-3 first:pt-0 last:pb-0 md:flex-row md:items-center md:justify-between"
+                >
+                  <div className="min-w-0">
+                    <p className="font-medium">
+                      {report.studentName}{" "}
+                      <span className="font-normal text-muted-foreground">
+                        · {report.date === today ? "Today" : friendlyDate(report.date)}
+                      </span>
+                    </p>
+                    <p className="mt-1 text-sm leading-5">
+                      &ldquo;{report.reason ?? "No reason given"}&rdquo;
+                    </p>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {report.guardianName ?? "Parent"} ·{" "}
+                      {new Date(report.createdAt).toLocaleString("en-US", {
+                        timeZone: "America/New_York",
+                        month: "short",
+                        day: "numeric",
+                        hour: "numeric",
+                        minute: "2-digit",
+                      })}
+                    </p>
+                  </div>
+                  {profile.role === "admin" ? <AbsenceReportReview reportId={report.id} /> : null}
+                </div>
+              ))}
+            </CardContent>
+          </Card>
+        ) : null}
+
         {loadError ? (
           <EmptyState
             title="Could not load attendance"
@@ -238,6 +301,15 @@ export default async function AttendancePage({
                       tone={attendanceTone(row.record?.status ?? null)}
                       className="capitalize"
                     />
+                    {reportsForDate.get(row.student.id) &&
+                    reportsForDate.get(row.student.id)?.status !== "dismissed" ? (
+                      <p className="mt-1 text-xs font-medium text-status-warning">
+                        Parent reported
+                        {reportsForDate.get(row.student.id)?.status === "pending"
+                          ? " · awaiting review"
+                          : ""}
+                      </p>
+                    ) : null}
                     {row.record?.arrived_at ? (
                       <p className="mt-1 text-xs text-muted-foreground">
                         Arrived {formatTime12h(row.record.arrived_at)}

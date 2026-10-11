@@ -23,6 +23,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { getPendingAbsenceReports } from "@/lib/absence-reports/reports-data";
 import { getCurrentProfile } from "@/lib/auth/current-profile";
 import {
   getAdminDailySummary,
@@ -186,10 +187,12 @@ function AdminDashboard({
   fullName,
   summary,
   escalations,
+  pendingAbsenceReports,
 }: {
   fullName: string;
   summary: AdminDailySummary;
   escalations: EscalationStudentResult[];
+  pendingAbsenceReports: number;
 }) {
   const gradeIssueCount =
     summary.lowGrades.length + summary.droppingGrades.length;
@@ -306,6 +309,22 @@ function AdminDashboard({
           </div>
         </div>
       </section>
+
+      {pendingAbsenceReports > 0 ? (
+        <Link
+          href="/attendance"
+          className="flex items-center justify-between gap-3 rounded-lg border border-status-warning/30 bg-status-warning-soft px-4 py-3 text-sm shadow-sm transition-colors hover:bg-status-warning-soft/70"
+        >
+          <span>
+            <span className="font-semibold text-status-warning">
+              {pendingAbsenceReports} parent-reported absence
+              {pendingAbsenceReports === 1 ? "" : "s"}
+            </span>{" "}
+            <span className="text-muted-foreground">waiting for review.</span>
+          </span>
+          <span className="font-medium text-primary">Review →</span>
+        </Link>
+      ) : null}
 
       <CriticalStudentsSection escalations={escalations} />
 
@@ -651,6 +670,7 @@ export default async function HomePage() {
   let children: Student[] = [];
   let adminDailySummary: AdminDailySummary | null = null;
   let adminEscalations: EscalationStudentResult[] = [];
+  let pendingAbsenceReports = 0;
   if (profile.role === "parent") {
     const supabase = await createClient();
     // RLS guarantees this only returns students linked to this parent.
@@ -663,10 +683,13 @@ export default async function HomePage() {
     children = (data ?? []) as Student[];
   } else if (profile.role === "admin") {
     const today = todayInSchoolTimeZone();
-    [adminDailySummary, adminEscalations] = await Promise.all([
+    let pendingReports: Awaited<ReturnType<typeof getPendingAbsenceReports>>;
+    [adminDailySummary, adminEscalations, pendingReports] = await Promise.all([
       getAdminDailySummary(today, { now: new Date() }),
       getEscalationStudents(today),
+      getPendingAbsenceReports(),
     ]);
+    pendingAbsenceReports = pendingReports.length;
   }
 
   return (
@@ -678,6 +701,7 @@ export default async function HomePage() {
           fullName={profile.fullName}
           summary={adminDailySummary}
           escalations={adminEscalations}
+          pendingAbsenceReports={pendingAbsenceReports}
         />
       ) : (
         <StaffDashboard fullName={profile.fullName} role={profile.role} />
