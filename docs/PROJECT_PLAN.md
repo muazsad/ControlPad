@@ -306,7 +306,7 @@ ControlPad holds **children's educational records and family phone numbers**:
 - Stripe online tuition payments
 - Richer parent portal
 - ~~Weekly parent summary~~ — skipped (owner decision, Oct 11).
-- **Report cards** — a per-student, per-term PDF built from existing grades, attendance and Quran data.
+- ~~Report cards~~ — skipped (owner decision, Oct 11): only sent every few months, not worth automating.
 
 ---
 
