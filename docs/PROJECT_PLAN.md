@@ -255,7 +255,7 @@ ControlPad holds **children's educational records and family phone numbers**:
 
 **Still to do:**
 1. **Twilio**: buy a number and complete A2P 10DLC registration (or toll-free verification), then `SMS_MODE=test` → `live`. Needs the school's legal name + EIN, a live website with privacy policy and terms pages, a non-Gmail contact email, and a parent opt-in (consent) line on enrollment. Details in `docs/SETUP.md` §3.
-2. **Apply the special-days migration**: `supabase db push` (adds `20261011000000_special_day_options.sql`). Until it's applied, Settings → Special days can't save the new options.
+2. ~~**Apply the special-days migration**~~ — done Oct 10 (`20261011000000_special_day_options.sql` applied; special days verified in production).
 3. ~~**Dedupe should ignore dry runs** (and failed sends)~~ — done Oct 10. See `decideDedupe()` in `lib/sms/send-sms.ts`: only `queued`/`sent` rows *from the same SMS mode* block a repeat (test-mode texts don't block live ones); dry runs only block other dry runs while texting is off; failed sends are retried up to `MAX_FAILED_SEND_ATTEMPTS` (3) per dedupe window.
 4. **Delete seed/test students** and their fake guardian phones before going live.
 5. **Create the real *Quran only* group** (days, start time, tardy grace, absence-check time) and assign students (Settings → Schedule groups; Students → Edit).
