@@ -18,6 +18,7 @@ const summary: AdminDailySummary = {
     paymentDueDay: 5,
     paceGapThreshold: 10,
     missingAssignmentsThreshold: 3,
+    staleGradeSchoolDays: 10,
   },
   absences: [],
   tardies: [],
@@ -26,6 +27,8 @@ const summary: AdminDailySummary = {
   droppingGrades: [],
   behindPace: [],
   missingWork: [],
+  staleCourses: [],
+  biggestDrops: [],
   quranSlippage: [],
   overduePayments: [],
 };

@@ -49,6 +49,7 @@ import type {
   EscalationLevel,
   EscalationStudentResult,
 } from "@/lib/people/escalation";
+import { TREND_WINDOW_DAYS } from "@/lib/grades/trend";
 import { createClient } from "@/lib/supabase/server";
 
 import { StaffChecklistSection } from "./staff-checklist-section";
@@ -489,6 +490,67 @@ function AdminDashboard({
                 status={`${issue.missing} missing`}
                 tone={issue.tone}
               />
+            </div>
+          ))}
+        </IssueGroup>
+
+        <IssueGroup
+          title="Stale data"
+          href="/grades/sweep"
+          empty="Every course has been updated recently."
+          hasItems={summary.staleCourses.length > 0}
+        >
+          {summary.staleCourses.map((issue) => (
+            <div
+              key={`stale-${issue.courseId}`}
+              className="flex items-center justify-between gap-3 border-b py-2 last:border-0"
+            >
+              <div>
+                <Link
+                  href={`/students/${issue.studentId}`}
+                  className="text-sm font-medium hover:underline"
+                >
+                  {issue.studentName}
+                </Link>
+                <p className="text-xs text-muted-foreground">
+                  {issue.courseName}
+                </p>
+              </div>
+              <StatusBadge
+                status={
+                  issue.status === "never"
+                    ? `Never graded · ${issue.schoolDaysSince} school days`
+                    : `${issue.schoolDaysSince} school days`
+                }
+                tone="neutral"
+              />
+            </div>
+          ))}
+        </IssueGroup>
+
+        <IssueGroup
+          title={`Biggest drops (${TREND_WINDOW_DAYS} days)`}
+          href="/grades?view=drops"
+          empty="No grade drops in the last two weeks."
+          hasItems={summary.biggestDrops.length > 0}
+        >
+          {summary.biggestDrops.map((issue) => (
+            <div
+              key={`drop-trend-${issue.studentId}`}
+              className="flex items-center justify-between gap-3 border-b py-2 last:border-0"
+            >
+              <div>
+                <Link
+                  href={`/students/${issue.studentId}`}
+                  className="text-sm font-medium hover:underline"
+                >
+                  {issue.studentName}
+                </Link>
+                <p className="text-xs text-muted-foreground">
+                  {issue.courseName} - {issue.baseline}% to {issue.latest}%
+                </p>
+              </div>
+              <StatusBadge status={`${issue.change} pts`} tone={issue.tone} />
             </div>
           ))}
         </IssueGroup>

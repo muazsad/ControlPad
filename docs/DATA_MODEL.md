@@ -287,6 +287,9 @@ create table absence_reports (
 --   settings.pace_gap_threshold          integer not null default 10 (1–100)
 --   settings.missing_assignments_threshold integer not null default 3 (1–100)
 --   notification_trigger += 'pace_behind', 'missing_assignments'
+
+-- Stale grade data (20261015000000_stale_grade_setting.sql, Oct 15 2026):
+--   settings.stale_grade_school_days     integer not null default 10 (1–90)
 ```
 
 ---
@@ -369,6 +372,11 @@ create policy students_parent_read on students
 - **Pace gap** = expected − latest `percent_complete`. Tone: success below `pace_gap_threshold`, warning at
   or above it, danger at or above 2× (`PACE_DANGER_MULTIPLIER`). Missing assignments use the same bands
   against `missing_assignments_threshold`.
+- **Stale course** = latest `grades.recorded_at` is more than `settings.stale_grade_school_days` of the
+  student's own expected school days old (Eastern dates; breaks/no-school days don't count). **Never
+  graded** = no grades row and `courses.created_at` older than the same threshold. Staff-only; no SMS.
+- **Grade trend** = latest grade − baseline over `TREND_WINDOW_DAYS` (14 calendar days): baseline is the
+  latest snapshot on or before today − 14, else the earliest in-window snapshot when there are at least 2.
 - **Grade slipping** = current grade below `settings.grade_floor`, or a downward delta across recent entries.
 - **Weekly tardies** = count of `attendance.status = 'tardy'` over the last 7 school days per student.
 - **Student's day** = their schedule group's row for that weekday (breaks and `no_school` days still

@@ -179,6 +179,8 @@ export type PaceContext = {
   term: TermDates;
   paceGapThreshold: number;
   missingAssignmentsThreshold: number;
+  /** School days without a snapshot before a course is stale (see staleness.ts). */
+  staleGradeSchoolDays: number;
   calendar: SchoolCalendarConfig;
   groups: Map<string, ScheduleGroup>;
   defaults: DefaultSchedule;

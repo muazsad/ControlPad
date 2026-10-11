@@ -1,3 +1,4 @@
+import { DEFAULT_STALE_GRADE_SCHOOL_DAYS } from "@/lib/grades/staleness";
 import {
   DEFAULT_MISSING_ASSIGNMENTS_THRESHOLD,
   DEFAULT_PACE_GAP_THRESHOLD,
@@ -28,7 +29,7 @@ export async function loadPaceContext(
     supabase
       .from("settings")
       .select(
-        "term_start, term_end, pace_gap_threshold, missing_assignments_threshold, school_start, tardy_window_hours",
+        "term_start, term_end, pace_gap_threshold, missing_assignments_threshold, stale_grade_school_days, school_start, tardy_window_hours",
       )
       .eq("id", 1)
       .single(),
@@ -47,6 +48,9 @@ export async function loadPaceContext(
     paceGapThreshold: Number(row.pace_gap_threshold ?? DEFAULT_PACE_GAP_THRESHOLD),
     missingAssignmentsThreshold: Number(
       row.missing_assignments_threshold ?? DEFAULT_MISSING_ASSIGNMENTS_THRESHOLD,
+    ),
+    staleGradeSchoolDays: Number(
+      row.stale_grade_school_days ?? DEFAULT_STALE_GRADE_SCHOOL_DAYS,
     ),
     calendar,
     groups: new Map(groups.map((group) => [group.id, group])),

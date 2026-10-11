@@ -9,6 +9,9 @@ import { StatusBadge } from "@/components/controlpad/status-badge";
 import { Button } from "@/components/ui/button";
 import { getCurrentProfile } from "@/lib/auth/current-profile";
 import { enrollmentBadgeTone } from "@/lib/people/people";
+import { studentGradeHealth } from "@/lib/grades/grade-health";
+import { loadPaceContext } from "@/lib/grades/pace-data";
+import { easternDateKey } from "@/lib/grades/sweep";
 import { getAllStudentMetrics } from "@/lib/people/student-metrics";
 
 export default async function StudentsPage() {
@@ -17,7 +20,22 @@ export default async function StudentsPage() {
 
   // RLS scopes this automatically: staff see all students, a parent sees only
   // students linked to their guardian record.
-  const students = await getAllStudentMetrics();
+  const metrics = await getAllStudentMetrics();
+
+  // Staleness is staff-only (parents can't read settings): no badge for them.
+  const paceContext = canManage ? await loadPaceContext() : null;
+  const today = easternDateKey(new Date());
+  const students = metrics.map((student) => ({
+    ...student,
+    health: paceContext
+      ? studentGradeHealth({
+          courses: student.courseSnapshots,
+          groupId: student.groupId,
+          context: paceContext,
+          today,
+        })
+      : null,
+  }));
 
   return (
     <AppShell fullName={profile.fullName} role={profile.role}>
@@ -91,14 +109,29 @@ export default async function StudentsPage() {
               key: "performance",
               header: "Performance",
               cell: (row) => (
-                <StatusBadge
-                  status={
-                    row.globalStatus === "scored" && row.globalScore !== null
-                      ? `${Math.round(row.globalScore)}%`
-                      : "Not enough data yet"
-                  }
-                  tone={row.globalTone}
-                />
+                <div className="flex flex-wrap items-center gap-2">
+                  {row.health?.allStale ? (
+                    <span title={row.health.staleTitle}>
+                      <StatusBadge status="Stale data" tone="neutral" />
+                    </span>
+                  ) : (
+                    <StatusBadge
+                      status={
+                        row.globalStatus === "scored" && row.globalScore !== null
+                          ? `${Math.round(row.globalScore)}%`
+                          : "Not enough data yet"
+                      }
+                      tone={row.globalTone}
+                    />
+                  )}
+                  {row.health &&
+                  row.health.staleCourses.length > 0 &&
+                  !row.health.allStale ? (
+                    <span title={row.health.staleTitle}>
+                      <StatusBadge status="Stale" tone="neutral" />
+                    </span>
+                  ) : null}
+                </div>
               ),
             },
           ]}

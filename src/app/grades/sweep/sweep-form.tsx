@@ -53,6 +53,9 @@ export type SweepRow = {
   missingTone: PaceTone;
   /** From server data; only changes after a save. */
   updatedRecently: boolean;
+  /** No grade update for too many of the student's school days (staff-only signal). */
+  staleStatus: "fresh" | "stale" | "never";
+  staleDays: number | null;
 };
 
 export type SweepGroup = { id: string; name: string };
@@ -134,6 +137,7 @@ export function SweepForm({
   const [groupFilter, setGroupFilter] = useState(GROUP_ALL);
   const [search, setSearch] = useState("");
   const [onlyStale, setOnlyStale] = useState(false);
+  const [staleOnly, setStaleOnly] = useState(false);
   const [pending, startTransition] = useTransition();
 
   const [hydrated, setHydrated] = useState(false);
@@ -158,6 +162,7 @@ export function SweepForm({
         return false;
       }
       if (onlyStale && row.updatedRecently) return false;
+      if (staleOnly && row.staleStatus === "fresh") return false;
       if (
         needle &&
         !row.studentName.toLowerCase().includes(needle) &&
@@ -167,7 +172,7 @@ export function SweepForm({
       }
       return true;
     });
-  }, [rows, groupFilter, search, onlyStale]);
+  }, [rows, groupFilter, search, onlyStale, staleOnly]);
 
   // Show the student's name only on their first visible course row.
   const tableRows = useMemo(
@@ -218,6 +223,7 @@ export function SweepForm({
   );
 
   const updatedCount = rows.filter((row) => row.updatedRecently).length;
+  const staleCount = rows.filter((row) => row.staleStatus !== "fresh").length;
 
   function setField(courseId: string, field: SweepField, value: string) {
     setEntries((prev) => ({
@@ -507,6 +513,15 @@ export function SweepForm({
           Only not updated in last {SWEEP_WINDOW_DAYS} days
         </Button>
         <Button
+          type="button"
+          variant={staleOnly ? "default" : "outline"}
+          aria-pressed={staleOnly}
+          className="h-10"
+          onClick={() => setStaleOnly((value) => !value)}
+        >
+          Stale only ({staleCount})
+        </Button>
+        <Button
           ref={saveRef}
           type="button"
           className="h-10"
@@ -535,6 +550,9 @@ export function SweepForm({
       <DataTable
         data={tableRows}
         getRowKey={(row) => row.courseId}
+        rowClassName={(row) =>
+          row.staleStatus === "fresh" ? undefined : "bg-status-warning-soft/40"
+        }
         empty={
           <EmptyState
             title="No courses match these filters"
@@ -611,6 +629,15 @@ export function SweepForm({
                 <div className="flex flex-wrap items-center gap-2">
                   {row.updatedRecently ? (
                     <StatusBadge status="Updated" tone="success" />
+                  ) : row.staleStatus !== "fresh" ? (
+                    <StatusBadge
+                      status={
+                        row.staleStatus === "never"
+                          ? "Never graded"
+                          : `Stale · ${row.staleDays ?? "?"} school days`
+                      }
+                      tone="neutral"
+                    />
                   ) : row.lastValue === null ? (
                     <StatusBadge status="Never graded" tone="neutral" />
                   ) : (

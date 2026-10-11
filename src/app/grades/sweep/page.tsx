@@ -11,6 +11,7 @@ import {
   easternDateKey,
   isWithinSweepWindow,
 } from "@/lib/grades/sweep";
+import { studentGradeHealth } from "@/lib/grades/grade-health";
 import { paceForCourse } from "@/lib/grades/pace";
 import { loadPaceContext } from "@/lib/grades/pace-data";
 import { fetchLatestGrades } from "@/lib/grades/sweep-data";
@@ -25,7 +26,13 @@ type StudentRow = {
   last_name: string;
   schedule_group_id: string | null;
   schedule_groups: { id: string; name: string } | null;
-  courses: { id: string; name: string; start_date: string | null; end_date: string | null }[];
+  courses: {
+    id: string;
+    name: string;
+    created_at: string | null;
+    start_date: string | null;
+    end_date: string | null;
+  }[];
 };
 
 function formatGradeDate(recordedAt: string, now: Date): string {
@@ -54,7 +61,7 @@ export default async function GradeSweepPage() {
     supabase
       .from("students")
       .select(
-        "id, first_name, last_name, schedule_group_id, schedule_groups(id, name), courses(id, name, start_date, end_date)",
+        "id, first_name, last_name, schedule_group_id, schedule_groups(id, name), courses(id, name, created_at, start_date, end_date)",
       )
       .eq("enrollment_status", "active"),
     fetchLatestGrades(supabase),
@@ -75,8 +82,21 @@ export default async function GradeSweepPage() {
       groups.set(student.schedule_groups.id, student.schedule_groups);
     }
     const courses = [...student.courses].sort((a, b) => byText(a.name, b.name));
+    const health = studentGradeHealth({
+      courses: courses.map((course) => ({
+        courseId: course.id,
+        courseName: course.name,
+        createdAt: course.created_at,
+        latestRecordedAt: latestGrades.get(course.id)?.recordedAt ?? null,
+        snapshots: [],
+      })),
+      groupId: student.schedule_group_id,
+      context: paceContext,
+      today,
+    });
     for (const course of courses) {
       const latest = latestGrades.get(course.id) ?? null;
+      const staleness = health.courses.find((item) => item.courseId === course.id)?.staleness;
       const pace = paceForCourse(
         paceContext,
         today,
@@ -98,9 +118,15 @@ export default async function GradeSweepPage() {
         paceTone: pace.paceTone,
         missingTone: pace.missingTone,
         updatedRecently: isWithinSweepWindow(latest?.recordedAt ?? null, now),
+        staleStatus: staleness?.status ?? "fresh",
+        staleDays: staleness?.schoolDaysSince ?? null,
       });
     }
   }
+
+  // Stale rows float to the top (stable sort keeps students grouped A–Z).
+  const staleRank = (row: SweepRow) => (row.staleStatus === "fresh" ? 1 : 0);
+  rows.sort((a, b) => staleRank(a) - staleRank(b));
 
   return (
     <AppShell fullName={profile.fullName} role={profile.role}>
