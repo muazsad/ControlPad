@@ -346,4 +346,32 @@ describe("computeStudentEscalations", () => {
     assert.deepEqual(result.signals.revision.overdueJuz, [3, 7, 12, 20]);
     assert.equal(result.level, "watch");
   });
+
+  it("pauses the Quran and revision signals during a juz test", () => {
+    const [result] = computeStudentEscalations(
+      [
+        {
+          ...baseStudent,
+          grades: [],
+          attendance: [],
+          quranProgress: [{ date: "2026-05-01", lines_memorized: 5 }],
+          payments: [],
+          notifications: [],
+          revisionOverdueJuz: [3, 7, 12, 20],
+          onJuzTest: true,
+        },
+      ],
+      {
+        asOfDate: "2026-07-01",
+        gradeFloor: 70,
+        tardiesPerWeek: 3,
+        quranInactivityDays: 7,
+        paymentDueDay: 5,
+      },
+    );
+    assert.equal(result.signals.quran.tripped, false);
+    assert.equal(result.signals.quran.score, 0);
+    assert.equal(result.signals.revision.tripped, false);
+    assert.equal(result.level, "ok");
+  });
 });

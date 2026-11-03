@@ -168,3 +168,79 @@ export async function setJuzMemorized(input: {
   revalidatePath("/");
   return { error: null };
 }
+
+/** Start a juz test: sabaq, sabaq para and dhor aren't expected until it's finished. */
+export async function startJuzTest(input: {
+  studentId: string;
+  juz: number;
+  startedOn: string;
+}): Promise<{ error: string | null }> {
+  const profile = await requireRole(["admin", "moderator"]);
+  const { studentId, juz, startedOn } = input;
+  if (!studentId || !Number.isInteger(juz) || juz < JUZ_MIN || juz > JUZ_MAX) {
+    return { error: `Choose a juz from ${JUZ_MIN} to ${JUZ_MAX}.` };
+  }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(startedOn)) return { error: "Choose a valid start date." };
+
+  const supabase = await createClient();
+  const { error } = await supabase.from("juz_tests").insert({
+    student_id: studentId,
+    juz,
+    started_on: startedOn,
+    started_by: profile.id,
+  });
+  if (error) {
+    // Unique partial index: one open test per student.
+    return {
+      error: error.code === "23505" ? "This student already has a juz test in progress." : error.message,
+    };
+  }
+
+  revalidatePath("/quran");
+  revalidatePath(`/quran/${studentId}`);
+  revalidatePath("/");
+  return { error: null };
+}
+
+/** Finish the open juz test and mark that juz memorized (as of the finish date). */
+export async function finishJuzTest(input: {
+  studentId: string;
+  testId: string;
+  finishedOn: string;
+}): Promise<{ error: string | null }> {
+  const profile = await requireRole(["admin", "moderator"]);
+  const { studentId, testId, finishedOn } = input;
+  if (!studentId || !testId) return { error: "Invalid juz test." };
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(finishedOn)) return { error: "Choose a valid finish date." };
+
+  const supabase = await createClient();
+  const { data: test, error } = await supabase
+    .from("juz_tests")
+    .update({ finished_on: finishedOn, finished_by: profile.id })
+    .eq("id", testId)
+    .eq("student_id", studentId)
+    .is("finished_on", null)
+    .select("juz, started_on")
+    .maybeSingle();
+  if (error) {
+    // Check constraint: finish can't be before start.
+    return { error: error.code === "23514" ? "Finish date can't be before the start date." : error.message };
+  }
+  if (!test) return { error: "This juz test is already finished." };
+
+  // Leaves an existing mark (and its date) untouched.
+  const { error: juzError } = await supabase
+    .from("student_memorized_juz")
+    .upsert(
+      { student_id: studentId, juz: test.juz, marked_at: finishedOn },
+      { onConflict: "student_id,juz", ignoreDuplicates: true },
+    );
+
+  revalidatePath("/quran");
+  revalidatePath(`/quran/${studentId}`);
+  revalidatePath("/");
+  if (juzError) {
+    return { error: `Test finished, but Juz ${test.juz} could not be marked memorized: ${juzError.message}` };
+  }
+  return { error: null };
+}

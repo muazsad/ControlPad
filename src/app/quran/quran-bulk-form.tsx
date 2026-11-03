@@ -9,6 +9,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { InlineError } from "@/components/controlpad/inline-error";
+import { StatusBadge } from "@/components/controlpad/status-badge";
 import { cn } from "@/lib/utils";
 import { studentName, type Student } from "@/lib/people/people";
 import { parseJuzList } from "@/lib/quran/lessons";
@@ -26,6 +27,8 @@ type Props = {
   latestEntries: LatestEntry[];
   initialDate: string;
   quranInactivityDays: number | null;
+  /** Students on an open juz test → the juz being tested. */
+  juzTests?: Record<string, number>;
 };
 
 function SubmitBar({ saved }: { saved?: number }) {
@@ -60,6 +63,7 @@ export function QuranBulkForm({
   latestEntries,
   initialDate,
   quranInactivityDays,
+  juzTests = {},
 }: Props) {
   const [state, formAction] = useActionState<QuranBulkState, FormData>(
     logQuranLessons,
@@ -149,7 +153,10 @@ export function QuranBulkForm({
         {students.map((student) => {
           const latest = latestMap.get(student.id);
           const days = latest ? daysSince(latest.date) : null;
+          const testJuz = juzTests[student.id];
+          // On a juz test sabaq isn't expected, so no stale highlight.
           const stale =
+            testJuz === undefined &&
             days !== null &&
             quranInactivityDays !== null &&
             days >= quranInactivityDays;
@@ -173,6 +180,11 @@ export function QuranBulkForm({
                 <p className="mt-0.5 text-xs text-muted-foreground">
                   {student.grade_level ?? "Grade not set"}
                 </p>
+                {testJuz !== undefined ? (
+                  <div className="mt-1">
+                    <StatusBadge status={`On juz test · Juz ${testJuz}`} tone="warning" />
+                  </div>
+                ) : null}
                 {latest ? (
                   <p
                     className={cn(

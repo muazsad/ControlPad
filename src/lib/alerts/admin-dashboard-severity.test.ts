@@ -33,6 +33,7 @@ const summary: AdminDailySummary = {
   quranSlippage: [],
   revisionOverdue: [],
   sabaqWithoutRevision: [],
+  onJuzTest: [],
   overduePayments: [],
 };
 

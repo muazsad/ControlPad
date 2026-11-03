@@ -1,4 +1,5 @@
 import { sabaqOnly } from "@/lib/quran/lessons";
+import { studentsOnJuzTest, type JuzTestRow } from "@/lib/quran/juz-test";
 import { juzRevisionStatuses, overdueJuz } from "@/lib/quran/revision";
 import { createClient } from "@/lib/supabase/server";
 import {
@@ -224,6 +225,7 @@ export async function getEscalationStudents(
     notificationsResult,
     paceEntries,
     memorizedResult,
+    juzTestsResult,
   ] = await Promise.all([
     supabase
       .from("settings")
@@ -265,6 +267,10 @@ export async function getEscalationStudents(
       .lte("created_at", `${endDate}T23:59:59.999Z`),
     loadPaceContext().then((context) => loadPaceEntries(supabase, context, endDate)),
     supabase.from("student_memorized_juz").select("student_id, juz, marked_at"),
+    supabase
+      .from("juz_tests")
+      .select("student_id, juz, started_on, finished_on")
+      .is("finished_on", null),
   ]);
 
   if (settingsResult.error) throw new Error(settingsResult.error.message);
@@ -274,6 +280,7 @@ export async function getEscalationStudents(
   if (quranResult.error) throw new Error(quranResult.error.message);
   if (paymentsResult.error) throw new Error(paymentsResult.error.message);
   if (memorizedResult.error) throw new Error(memorizedResult.error.message);
+  if (juzTestsResult.error) throw new Error(juzTestsResult.error.message);
   if (notificationsResult.error) {
     throw new Error(notificationsResult.error.message);
   }
@@ -295,6 +302,7 @@ export async function getEscalationStudents(
   const memorizedByStudent = groupByStudent(
     (memorizedResult.data ?? []) as { student_id: string; juz: number; marked_at: string }[],
   );
+  const onJuzTest = studentsOnJuzTest((juzTestsResult.data ?? []) as JuzTestRow[], endDate);
   const payments = (paymentsResult.data ?? []) as PaymentRow[];
   const notificationsByStudent = groupByStudent(
     ((notificationsResult.data ?? []) as NotificationRow[]).filter(
@@ -370,6 +378,7 @@ export async function getEscalationStudents(
           calendar,
         }),
       ).map((status) => status.juz),
+      onJuzTest: onJuzTest.has(student.id),
       notifications: (notificationsByStudent.get(student.id) ?? []).map(
         (notification): EscalationNotificationEntry => ({
           createdAt: notification.created_at,

@@ -1,3 +1,4 @@
+import { studentsOnJuzTest, type JuzTestRow } from "@/lib/quran/juz-test";
 import { createServiceClient } from "@/lib/supabase/server";
 import { sendSms, type SendSmsInput, type SmsResult } from "@/lib/sms/send-sms";
 import { getServiceSchoolCalendar } from "@/lib/schedule/calendar-data";
@@ -115,7 +116,15 @@ export function createSupabaseQuranAlertDatabase(): QuranAlertDatabase {
         .eq("enrollment_status", "active");
       if (studentsError) throw new Error(studentsError.message);
 
-      const students = allStudents ?? [];
+      // Students on an open juz test aren't expected to do sabaq.
+      const { data: testRows, error: testsError } = await supabase
+        .from("juz_tests")
+        .select("student_id, juz, started_on, finished_on")
+        .is("finished_on", null);
+      if (testsError) throw new Error(testsError.message);
+      const onTest = studentsOnJuzTest((testRows ?? []) as JuzTestRow[], asOfDate);
+
+      const students = (allStudents ?? []).filter((s) => !onTest.has(s.id as string));
       if (students.length === 0) return [];
 
       const studentIds = students.map((s) => s.id as string);

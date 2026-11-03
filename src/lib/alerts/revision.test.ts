@@ -79,4 +79,10 @@ describe("checkRevisionOverdueAlerts", () => {
     ]);
     assert.equal(sent.length, 0);
   });
+
+  it("skips a student on an open juz test", async () => {
+    const { result, sent } = await run("2026-10-12", [{ ...yusuf, onJuzTest: true }]);
+    assert.deepEqual(result, { students: 0, messages: 0 });
+    assert.equal(sent.length, 0);
+  });
 });

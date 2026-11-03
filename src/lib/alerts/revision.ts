@@ -1,4 +1,5 @@
 import { isoWeekKey } from "@/lib/grades/pace";
+import { activeJuzTest, type JuzTestRow } from "@/lib/quran/juz-test";
 import { isRevision } from "@/lib/quran/lessons";
 import {
   DEFAULT_REVISION_OVERDUE_SCHOOL_DAYS,
@@ -26,13 +27,15 @@ export type RevisionStudent = {
   /** Revision entries (sabaq para / dhor); sabaq rows are ignored. */
   entries: QuranLessonEntry[];
   guardians: Recipient[];
+  /** Open juz test: revision isn't expected, so no text. */
+  onJuzTest?: boolean;
 };
 
 export type RevisionAlertDatabase = {
   getRevisionOverdueSchoolDays(): Promise<number>;
   getSchoolCalendar(): Promise<SchoolCalendarConfig>;
   getAdminRecipients(): Promise<Recipient[]>;
-  getStudents(): Promise<RevisionStudent[]>;
+  getStudents(asOfDate: string): Promise<RevisionStudent[]>;
 };
 
 type Deps = {
@@ -51,6 +54,7 @@ type StudentRow = {
   student_guardians:
     | { guardians: Recipient | Recipient[] | null }[]
     | null;
+  juz_tests: JuzTestRow[] | null;
 };
 
 export function createSupabaseRevisionAlertDatabase(): RevisionAlertDatabase {
@@ -78,12 +82,12 @@ export function createSupabaseRevisionAlertDatabase(): RevisionAlertDatabase {
       if (error) throw new Error(error.message);
       return (data ?? []) as Recipient[];
     },
-    async getStudents() {
+    async getStudents(asOfDate) {
       // One query: memorized juz, revision entries and guardians per student.
       const { data, error } = await supabase
         .from("students")
         .select(
-          "id, first_name, last_name, student_memorized_juz(juz, marked_at), quran_progress(date, lesson_type, juz), student_guardians(guardians(full_name, phone))",
+          "id, first_name, last_name, student_memorized_juz(juz, marked_at), quran_progress(date, lesson_type, juz), student_guardians(guardians(full_name, phone)), juz_tests(juz, started_on, finished_on)",
         )
         .eq("enrollment_status", "active")
         .neq("quran_progress.lesson_type", "sabaq");
@@ -100,6 +104,7 @@ export function createSupabaseRevisionAlertDatabase(): RevisionAlertDatabase {
         guardians: (row.student_guardians ?? []).flatMap((link) =>
           Array.isArray(link.guardians) ? link.guardians : link.guardians ? [link.guardians] : [],
         ),
+        onJuzTest: activeJuzTest(row.juz_tests, asOfDate) !== null,
       }));
     },
   };
@@ -120,7 +125,7 @@ export async function checkRevisionOverdueAlerts(
   if (!isSchoolDay(asOfDate, calendar)) return { students: 0, messages: 0 };
 
   const [students, admins] = await Promise.all([
-    database.getStudents(),
+    database.getStudents(asOfDate),
     database.getAdminRecipients(),
   ]);
   const week = isoWeekKey(asOfDate);
@@ -128,6 +133,7 @@ export async function checkRevisionOverdueAlerts(
   let flagged = 0;
 
   for (const student of students) {
+    if (student.onJuzTest) continue;
     const overdue = overdueJuz(
       juzRevisionStatuses({
         memorized: student.memorized,

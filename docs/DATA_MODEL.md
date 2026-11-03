@@ -131,6 +131,19 @@ create table student_memorized_juz (
   unique (student_id, juz)
 );
 
+-- Juz tests (Nov 3 2026). Open while finished_on is null (max one per student);
+-- sabaq / sabaq para / dhor aren't expected meanwhile. Finishing marks the juz memorized.
+create table juz_tests (
+  id           uuid primary key default gen_random_uuid(),
+  student_id   uuid not null references students(id) on delete cascade,
+  juz          smallint not null check (juz between 1 and 30),
+  started_on   date not null default current_date,
+  finished_on  date,                                   -- >= started_on
+  started_by   uuid references auth.users(id),
+  finished_by  uuid references auth.users(id),
+  created_at   timestamptz not null default now()
+);
+
 create table payments (
   id            uuid primary key default gen_random_uuid(),
   student_id    uuid not null references students(id) on delete cascade,
@@ -328,7 +341,7 @@ as $$ select role from public.profiles where id = auth.uid() $$;
 
 | Table | Admin | Moderator | Parent |
 |-------|-------|-----------|--------|
-| students, courses, grades, attendance, quran_progress, student_memorized_juz | full | read + write | read **own children only** |
+| students, courses, grades, attendance, quran_progress, student_memorized_juz, juz_tests | full | read + write | read **own children only** |
 | guardians, student_guardians | full | read | read **own record / own children** |
 | payments | full | read | read **own children only** |
 | settings | read + write | read | none |
@@ -406,6 +419,9 @@ create policy students_parent_read on students
 - **Quran slip** = school days since the latest **sabaq** `quran_progress.date` reach `settings.quran_inactivity_days`.
 - **Revision overdue** = for a row in `student_memorized_juz`, school days since the latest `sabaq_para`/`dhor`
   row for that juz (else `marked_at`) exceed `settings.revision_overdue_school_days`.
+- **On juz test** = a `juz_tests` row with `finished_on is null`. Quran slip, revision overdue, sabaq without
+  revision, the Quran/revision escalation signals and the staff checklist's Quran gap all skip the student;
+  the Quran score is computed as of `started_on`.
 - **Overdue payment** = no `payments` row with `status='paid'` for the current `period_month` once the day of month passes `settings.payment_due_day`.
 - **School day** = configured weekly pattern minus breaks and whole-school special days that close
   school (`no_school`, or `students_expected = false`); `half_day` special days count as school

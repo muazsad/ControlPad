@@ -99,6 +99,8 @@ export type EscalationStudentInput = {
   paceCourses?: EscalationPaceEntry[];
   /** Optional: memorized juz currently overdue for revision. */
   revisionOverdueJuz?: number[];
+  /** Open juz test: the Quran and revision signals are paused. */
+  onJuzTest?: boolean;
 };
 
 export type EscalationSettings = {
@@ -365,6 +367,17 @@ function quranSignal(
   return { ...signal, pattern: calendarAdjustedPattern, daysSinceLastEntry };
 }
 
+/** On a juz test sabaq isn't expected, so the Quran signal stays quiet. */
+function pausedQuranSignal(settings: EscalationSettings): QuranEscalationSignal {
+  const signal = baseSignal({
+    occurrences: 0,
+    dates: [],
+    asOfDate: settings.asOfDate,
+    details: "Paused: on juz test",
+  });
+  return { ...signal, pattern: null, daysSinceLastEntry: null };
+}
+
 function paymentSignal(
   payments: EscalationPaymentEntry[],
   settings: EscalationSettings,
@@ -476,7 +489,9 @@ export function computeStudentEscalations(
       const signals = {
         grades: gradeSignal(student.grades, settings),
         attendance: attendanceSignal(student.attendance, settings),
-        quran: quranSignal(student.quranProgress, settings),
+        quran: student.onJuzTest
+          ? pausedQuranSignal(settings)
+          : quranSignal(student.quranProgress, settings),
         payments: paymentSignal(
           student.payments,
           settings,
@@ -484,7 +499,10 @@ export function computeStudentEscalations(
         ),
         pace: paceSignal(student.paceCourses ?? [], settings),
         missing: missingWorkSignal(student.paceCourses ?? [], settings),
-        revision: revisionSignal(student.revisionOverdueJuz ?? [], settings),
+        revision: revisionSignal(
+          student.onJuzTest ? [] : (student.revisionOverdueJuz ?? []),
+          settings,
+        ),
       };
       const signalList = Object.entries(signals) as [
         EscalationSignalKey,
