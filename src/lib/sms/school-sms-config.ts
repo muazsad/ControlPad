@@ -72,3 +72,14 @@ export async function loadSchoolSmsConfig(
   if (error) throw new Error(error.message);
   return resolveSmsConfig(data as SchoolSmsRow | null, env, (sealed) => decryptSecret(sealed, credentialsKey(env)));
 }
+
+/** True once the school's Twilio details have been verified (setup checklist). */
+export async function isTextingVerified(schoolId: string): Promise<boolean> {
+  const { data, error } = await createServiceClient()
+    .from("school_sms_config")
+    .select("verified_at")
+    .eq("school_id", schoolId)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  return Boolean(data?.verified_at);
+}

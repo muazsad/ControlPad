@@ -53,6 +53,9 @@ import { TREND_WINDOW_DAYS } from "@/lib/grades/trend";
 import { createClient } from "@/lib/supabase/server";
 
 import { StaffChecklistSection } from "./staff-checklist-section";
+import { SetupChecklist } from "@/components/controlpad/setup-checklist";
+import { buildSetupChecklist, type SetupItem } from "@/lib/schools/setup-checklist";
+import { isTextingVerified } from "@/lib/sms/school-sms-config";
 
 function dangerIssueTone(count: number) {
   return count > 0 ? ("danger" as const) : ("success" as const);
@@ -208,12 +211,15 @@ function AdminDashboard({
   escalations,
   pendingAbsenceReports,
   staffChecklist,
+  setup,
 }: {
   fullName: string;
   summary: AdminDailySummary;
   escalations: EscalationStudentResult[];
   pendingAbsenceReports: number;
   staffChecklist: { rows: TeacherChecklist[]; anyTeacherAssigned: boolean } | null;
+  /** New-school checklist; null once everything is done. */
+  setup: { schoolId: string; items: SetupItem[] } | null;
 }) {
   const gradeIssueCount =
     summary.lowGrades.length + summary.droppingGrades.length;
@@ -295,6 +301,7 @@ function AdminDashboard({
 
   return (
     <div className="space-y-7">
+      {setup ? <SetupChecklist schoolId={setup.schoolId} items={setup.items} /> : null}
       <section className="rounded-xl border bg-card p-5 shadow-sm sm:p-6">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div>
@@ -871,6 +878,29 @@ function ParentDashboard({
   );
 }
 
+/** Counts for the new-school checklist; null when every step is done. */
+async function loadSetupChecklist(
+  schoolId: string,
+): Promise<{ schoolId: string; items: SetupItem[] } | null> {
+  const supabase = await createClient();
+  const count = async (query: PromiseLike<{ count: number | null }>) => (await query).count ?? 0;
+  const [scheduleGroups, staff, students, guardians, textingVerified] = await Promise.all([
+    count(supabase.from("schedule_groups").select("id", { count: "exact", head: true }).eq("school_id", schoolId)),
+    count(
+      supabase
+        .from("profiles")
+        .select("id", { count: "exact", head: true })
+        .eq("school_id", schoolId)
+        .eq("role", "moderator"),
+    ),
+    count(supabase.from("students").select("id", { count: "exact", head: true }).eq("school_id", schoolId)),
+    count(supabase.from("guardians").select("id", { count: "exact", head: true }).eq("school_id", schoolId)),
+    isTextingVerified(schoolId),
+  ]);
+  const checklist = buildSetupChecklist({ scheduleGroups, staff, students, guardians, textingVerified });
+  return checklist.complete ? null : { schoolId, items: checklist.items };
+}
+
 export default async function HomePage() {
   const profile = await getCurrentProfile();
 
@@ -879,6 +909,7 @@ export default async function HomePage() {
   let adminEscalations: EscalationStudentResult[] = [];
   let pendingAbsenceReports = 0;
   let staffChecklist: { rows: TeacherChecklist[]; anyTeacherAssigned: boolean } | null = null;
+  let setup: { schoolId: string; items: SetupItem[] } | null = null;
   if (profile.role === "parent") {
     const supabase = await createClient();
     // RLS guarantees this only returns students linked to this parent.
@@ -900,6 +931,7 @@ export default async function HomePage() {
       getStaffChecklist(profile.schoolId, profile.timeZone).catch(() => null),
     ]);
     pendingAbsenceReports = pendingReports.length;
+    setup = await loadSetupChecklist(profile.schoolId).catch(() => null);
   }
 
   return (
@@ -917,6 +949,7 @@ export default async function HomePage() {
           escalations={adminEscalations}
           pendingAbsenceReports={pendingAbsenceReports}
           staffChecklist={staffChecklist}
+          setup={setup}
         />
       ) : (
         <StaffDashboard fullName={profile.fullName} role={profile.role} />
