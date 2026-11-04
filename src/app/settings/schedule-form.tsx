@@ -39,6 +39,9 @@ type Props = {
   specialDays: SpecialDay[];
   groups: { id: string; name: string }[];
   recipientCounts: Record<string, number>;
+  /** The school's text prefix and time zone, shown in the special-days form. */
+  smsName: string;
+  timeZone: string;
 };
 
 const weekdayLabels: Record<WeekdayKey, string> = {
@@ -108,6 +111,8 @@ export function ScheduleForm({
   specialDays,
   groups,
   recipientCounts,
+  smsName,
+  timeZone,
 }: Props) {
   const calendarConfig: SchoolCalendarConfig = {
     weeklyPattern,
@@ -239,6 +244,8 @@ export function ScheduleForm({
             specialDays={specialDays}
             groups={groups}
             recipientCounts={recipientCounts}
+            smsName={smsName}
+            timeZone={timeZone}
           />
         </div>
 

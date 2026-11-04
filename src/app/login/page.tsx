@@ -1,5 +1,7 @@
 "use client";
 
+import Link from "next/link";
+
 import { createClient } from "@/lib/supabase/client";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
@@ -62,7 +64,7 @@ export default function LoginPage() {
               Sign in to ControlPad
             </CardTitle>
             <CardDescription>
-              Use your Salaam Institute account to view today&apos;s school
+              Use your ControlPad account to view today&apos;s school
               records.
             </CardDescription>
           </CardHeader>
@@ -97,6 +99,13 @@ export default function LoginPage() {
               <Button type="submit" disabled={loading} className="h-10 w-full">
                 {loading ? "Signing in..." : "Sign in"}
               </Button>
+
+              <p className="text-center text-sm text-muted-foreground">
+                New school?{" "}
+                <Link href="/signup" className="underline">
+                  Create a school
+                </Link>
+              </p>
             </form>
           </CardContent>
         </Card>

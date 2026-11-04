@@ -1,5 +1,6 @@
 import { createServiceClient } from "@/lib/supabase/server";
 import { sendSms, type SendSmsInput, type SmsResult } from "@/lib/sms/send-sms";
+import type { SchoolContext } from "@/lib/schools/school-context";
 
 type Recipient = {
   full_name: string;
@@ -35,7 +36,7 @@ function formatPercent(value: number) {
   return `${Number.isInteger(value) ? value : value.toFixed(1)}%`;
 }
 
-export function createSupabaseGradeAlertDatabase(): GradeAlertDatabase {
+export function createSupabaseGradeAlertDatabase(ctx: SchoolContext): GradeAlertDatabase {
   const supabase = createServiceClient();
 
   return {
@@ -43,7 +44,7 @@ export function createSupabaseGradeAlertDatabase(): GradeAlertDatabase {
       const { data, error } = await supabase
         .from("settings")
         .select("grade_floor")
-        .eq("id", 1)
+        .eq("school_id", ctx.schoolId)
         .single();
 
       if (error) throw new Error(error.message);
@@ -53,6 +54,7 @@ export function createSupabaseGradeAlertDatabase(): GradeAlertDatabase {
       const { data, error } = await supabase
         .from("profiles")
         .select("full_name, phone")
+        .eq("school_id", ctx.schoolId)
         .eq("role", "admin")
         .not("phone", "is", null);
 
@@ -63,6 +65,7 @@ export function createSupabaseGradeAlertDatabase(): GradeAlertDatabase {
       const { data, error } = await supabase
         .from("student_guardians")
         .select("guardians(full_name, phone)")
+        .eq("school_id", ctx.schoolId)
         .eq("student_id", studentId);
 
       if (error) throw new Error(error.message);
@@ -79,10 +82,11 @@ export function createSupabaseGradeAlertDatabase(): GradeAlertDatabase {
 }
 
 export async function checkLowGradeAlert(
+  ctx: SchoolContext,
   input: GradeAlertInput,
   deps: GradeAlertDeps = {},
 ): Promise<GradeAlertResult> {
-  const database = deps.database ?? createSupabaseGradeAlertDatabase();
+  const database = deps.database ?? createSupabaseGradeAlertDatabase(ctx);
   const send = deps.sendSms ?? sendSms;
   const gradeFloor = await database.getGradeFloor();
 
@@ -113,6 +117,7 @@ export async function checkLowGradeAlert(
   await Promise.all(
     recipients.map((recipient) =>
       send({
+        schoolId: ctx.schoolId,
         recipientPhone: recipient.phone,
         recipientType: recipient.type,
         studentId: input.studentId,

@@ -30,6 +30,8 @@ type Props = {
   /** School-local date to pre-fill when scheduling (tomorrow). */
   defaultDate: string;
   minDate: string;
+  /** The school's text prefix, shown in the preview. */
+  smsName: string;
 };
 
 const initialState: AnnouncementFormState = { error: null, success: null, version: 0 };
@@ -101,6 +103,7 @@ function ComposeFields({
   students,
   defaultDate,
   minDate,
+  smsName,
   action,
   pending,
   error,
@@ -114,7 +117,7 @@ function ComposeFields({
     () => familyCount(students, audience === "all" ? null : groups),
     [students, audience, groups],
   );
-  const body = message.trim() ? announcementBody(message) : "";
+  const body = message.trim() ? announcementBody(message, smsName) : "";
   const segments = smsSegments(body);
   const families = `${recipients} famil${recipients === 1 ? "y" : "ies"}`;
 

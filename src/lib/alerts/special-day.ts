@@ -19,6 +19,7 @@ import {
   SPECIAL_DAY_DEDUPE_HOURS,
   SPECIAL_DAY_NOTICE_TIME,
 } from "@/lib/alerts/special-day-constants";
+import { withSchoolPrefix, type SchoolContext } from "@/lib/schools/school-context";
 
 export {
   SPECIAL_DAY_DEDUPE_HOURS,
@@ -26,16 +27,13 @@ export {
   SPECIAL_DAY_NOTICE_TIME,
 } from "@/lib/alerts/special-day-constants";
 
-const MESSAGE_PREFIX = "Salaam Institute: ";
-
 export type SpecialDayStudent = {
   groupId: string | null;
   guardians: { phone: string | null }[];
 };
 
-export function specialDayNoticeBody(message: string): string {
-  const trimmed = message.trim();
-  return /^salaam institute/i.test(trimmed) ? trimmed : `${MESSAGE_PREFIX}${trimmed}`;
+export function specialDayNoticeBody(message: string, smsName: string): string {
+  return withSchoolPrefix(message, smsName);
 }
 
 /** Unique guardian phones for students the special day applies to. */
@@ -102,13 +100,14 @@ type StudentRow = {
     | null;
 };
 
-export function createSupabaseSpecialDayNoticeDatabase(): SpecialDayNoticeDatabase {
+export function createSupabaseSpecialDayNoticeDatabase(ctx: SchoolContext): SpecialDayNoticeDatabase {
   const supabase = createServiceClient();
   return {
     async getSpecialDay(date) {
       const { data, error } = await supabase
         .from("school_special_days")
         .select(SPECIAL_DAY_COLUMNS)
+        .eq("school_id", ctx.schoolId)
         .eq("date", date)
         .maybeSingle();
       if (error) throw new Error(error.message);
@@ -118,6 +117,7 @@ export function createSupabaseSpecialDayNoticeDatabase(): SpecialDayNoticeDataba
       const { data, error } = await supabase
         .from("students")
         .select("schedule_group_id, student_guardians(guardians(phone))")
+        .eq("school_id", ctx.schoolId)
         .eq("enrollment_status", "active");
       if (error) throw new Error(error.message);
       return ((data ?? []) as StudentRow[]).map((row) => ({
@@ -135,6 +135,7 @@ export function createSupabaseSpecialDayNoticeDatabase(): SpecialDayNoticeDataba
       const { error } = await supabase
         .from("school_special_days")
         .update({ parents_notified_at: at.toISOString() })
+        .eq("school_id", ctx.schoolId)
         .eq("date", date);
       if (error) throw new Error(error.message);
     },
@@ -150,13 +151,14 @@ export type SpecialDayNoticeResult = {
 
 /** Texts the special day's message to parents of students in scope. */
 export async function sendSpecialDayNotice(
+  ctx: SchoolContext,
   input: { date: string; now?: Date },
   deps: {
     database?: SpecialDayNoticeDatabase;
     sendSms?: (input: SendSmsInput) => Promise<SmsResult>;
   } = {},
 ): Promise<SpecialDayNoticeResult> {
-  const database = deps.database ?? createSupabaseSpecialDayNoticeDatabase();
+  const database = deps.database ?? createSupabaseSpecialDayNoticeDatabase(ctx);
   const send = deps.sendSms ?? sendSms;
   const now = input.now ?? new Date();
 
@@ -171,11 +173,12 @@ export async function sendSpecialDayNotice(
     return { sent: false, reason: "No parent phone numbers for the students this day applies to.", recipients: 0, statuses: {} };
   }
 
-  const body = specialDayNoticeBody(message);
+  const body = specialDayNoticeBody(message, ctx.smsName);
   const dedupeKey = specialDayDedupeKey(day.date, message);
   const results = await Promise.all(
     phones.map((phone) =>
       send({
+        schoolId: ctx.schoolId,
         recipientPhone: phone,
         recipientType: "parent",
         studentId: null,

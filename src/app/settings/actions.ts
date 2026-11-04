@@ -2,9 +2,10 @@
 
 import { revalidatePath } from "next/cache";
 
-import { requireRole } from "@/lib/auth/current-profile";
+import { requireRole, schoolContextOf } from "@/lib/auth/current-profile";
 import { createClient } from "@/lib/supabase/server";
 import { sendSpecialDayNotice } from "@/lib/alerts/special-day";
+import { isValidTimeZone } from "@/lib/schools/time-zones";
 import { WEEKDAY_KEYS } from "@/lib/schedule/calendar";
 import { parseSpecialDayForm } from "@/lib/schedule/special-day-validation";
 
@@ -24,7 +25,7 @@ export async function updateSettings(
   _prevState: SettingsFormState,
   formData: FormData,
 ): Promise<SettingsFormState> {
-  await requireRole(["admin"]);
+  const profile = await requireRole(["admin"]);
 
   const parsed = parseSettingsForm(formData);
   if (!parsed.ok) {
@@ -38,7 +39,7 @@ export async function updateSettings(
       ...parsed.values,
       updated_at: new Date().toISOString(),
     })
-    .eq("id", 1);
+    .eq("school_id", profile.schoolId);
 
   if (error) {
     return { error: error.message, success: null };
@@ -81,7 +82,7 @@ function datesInRange(startDate: string, endDate: string): string[] {
 }
 
 export async function updateWeeklyPattern(formData: FormData) {
-  await requireRole(["admin"]);
+  const profile = await requireRole(["admin"]);
 
   const values = Object.fromEntries(
     WEEKDAY_KEYS.map((day) => [day, formData.get(day) === "on"]),
@@ -90,11 +91,11 @@ export async function updateWeeklyPattern(formData: FormData) {
   const supabase = await createClient();
   const { error } = await supabase.from("school_weekly_patterns").upsert(
     {
-      id: 1,
+      school_id: profile.schoolId,
       ...values,
       updated_at: new Date().toISOString(),
     },
-    { onConflict: "id" },
+    { onConflict: "school_id" },
   );
 
   if (error) throw error;
@@ -177,7 +178,7 @@ export async function saveSpecialDay(
   _prev: SpecialDayFormState,
   formData: FormData,
 ): Promise<SpecialDayFormState> {
-  await requireRole(["admin"]);
+  const profile = await requireRole(["admin"]);
 
   let date: string;
   try {
@@ -206,12 +207,13 @@ export async function saveSpecialDay(
 
   const { error: upsertError } = await supabase.from("school_special_days").upsert(
     {
+      school_id: profile.schoolId,
       date,
       ...parsed.values,
       parents_notified_at: parentsNotifiedAt,
       updated_at: new Date().toISOString(),
     },
-    { onConflict: "date" },
+    { onConflict: "school_id,date" },
   );
   if (upsertError) return failure(upsertError.message);
 
@@ -246,7 +248,7 @@ export async function applySpecialDayRange(
   _prev: SpecialDayFormState,
   formData: FormData,
 ): Promise<SpecialDayFormState> {
-  await requireRole(["admin"]);
+  const profile = await requireRole(["admin"]);
 
   let startDate: string;
   let endDate: string;
@@ -263,6 +265,7 @@ export async function applySpecialDayRange(
 
   const updatedAt = new Date().toISOString();
   const rows = datesInRange(startDate, endDate).map((date) => ({
+    school_id: profile.schoolId,
     date,
     ...parsed.values,
     parents_notified_at: null,
@@ -272,7 +275,7 @@ export async function applySpecialDayRange(
   const supabase = await createClient();
   const { error } = await supabase
     .from("school_special_days")
-    .upsert(rows, { onConflict: "date" });
+    .upsert(rows, { onConflict: "school_id,date" });
 
   if (error) return failure(error.message);
 
@@ -284,10 +287,10 @@ export async function applySpecialDayRange(
 export async function textParentsForSpecialDay(
   date: string,
 ): Promise<SpecialDayFormState> {
-  await requireRole(["admin"]);
+  const profile = await requireRole(["admin"]);
 
   try {
-    const result = await sendSpecialDayNotice({ date });
+    const result = await sendSpecialDayNotice(schoolContextOf(profile), { date });
     revalidatePath("/settings");
     revalidatePath("/messages");
     if (!result.sent) return { error: result.reason, success: null };
@@ -465,4 +468,34 @@ export async function deleteScheduleGroup(id: string) {
   revalidatePath("/settings");
   revalidatePath("/attendance");
   revalidatePath("/students");
+}
+
+// ── School details ───────────────────────────────────────────────────────────
+
+export async function updateSchool(
+  _prev: SettingsFormState,
+  formData: FormData,
+): Promise<SettingsFormState> {
+  const profile = await requireRole(["admin"]);
+  const name = ((formData.get("school_name") as string | null) ?? "").trim();
+  const smsName = ((formData.get("sms_name") as string | null) ?? "").trim() || name;
+  const timeZone = ((formData.get("time_zone") as string | null) ?? "").trim();
+  if (name.length < 2 || name.length > 80) {
+    return { error: "School name must be 2–80 characters.", success: null };
+  }
+  if (smsName.length < 2 || smsName.length > 40) {
+    return { error: "Name on texts must be 2–40 characters.", success: null };
+  }
+  if (!isValidTimeZone(timeZone)) return { error: "Pick a time zone.", success: null };
+
+  const supabase = await createClient();
+  // RLS (schools_admin_update) + column grants limit this to the admin's own school.
+  const { error } = await supabase
+    .from("schools")
+    .update({ name, sms_name: smsName, time_zone: timeZone })
+    .eq("id", profile.schoolId);
+  if (error) return { error: error.message, success: null };
+
+  revalidatePath("/", "layout");
+  return { error: null, success: "School details saved." };
 }

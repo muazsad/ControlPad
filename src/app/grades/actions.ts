@@ -5,7 +5,7 @@ import { redirect } from "next/navigation";
 
 import { checkLowGradeAlert } from "@/lib/alerts/grades";
 import { checkPaceAlerts } from "@/lib/alerts/pace";
-import { requireRole } from "@/lib/auth/current-profile";
+import { requireRole, schoolContextOf } from "@/lib/auth/current-profile";
 import type { PaceContext } from "@/lib/grades/pace";
 import { loadPaceContext } from "@/lib/grades/pace-data";
 import {
@@ -19,6 +19,7 @@ import {
 import { fetchLatestGrades } from "@/lib/grades/sweep-data";
 import { studentName } from "@/lib/people/people";
 import { createClient } from "@/lib/supabase/server";
+import type { SchoolContext } from "@/lib/schools/school-context";
 
 export type GradeActionState = { error: string | null };
 
@@ -131,10 +132,10 @@ type SnapshotAlertTarget = {
  * itself changed, then the pace/missing-work alerts. Sequential, and an alert
  * failure is logged (no PII) but never fails a save that already succeeded.
  */
-async function runSnapshotAlerts(targets: SnapshotAlertTarget[]) {
+async function runSnapshotAlerts(ctx: SchoolContext, targets: SnapshotAlertTarget[]) {
   let context: PaceContext | undefined;
   try {
-    context = await loadPaceContext({ service: true });
+    context = await loadPaceContext(ctx.schoolId, { service: true });
   } catch (error) {
     console.error(
       "Grade save: could not load pace settings",
@@ -146,7 +147,7 @@ async function runSnapshotAlerts(targets: SnapshotAlertTarget[]) {
     const { insert } = target;
     if (insert.gradeChanged) {
       try {
-        await checkLowGradeAlert({
+        await checkLowGradeAlert(ctx, {
           studentId: insert.studentId,
           studentName: target.studentName,
           courseName: target.courseName,
@@ -163,6 +164,7 @@ async function runSnapshotAlerts(targets: SnapshotAlertTarget[]) {
     if (!context) continue;
     try {
       await checkPaceAlerts(
+        ctx,
         {
           studentId: insert.studentId,
           studentName: target.studentName,
@@ -288,7 +290,7 @@ export async function recordGrade(
     .insert(snapshotRow(insert, profile.id, nullable(form, "note")));
   if (error) return { error: error.message };
 
-  await runSnapshotAlerts([
+  await runSnapshotAlerts(schoolContextOf(profile), [
     {
       insert,
       studentName: student ? studentName(student) : "A student",
@@ -396,6 +398,7 @@ export async function saveGradeSweep(
     if (error) return { ...empty, error: error.message };
 
     await runSnapshotAlerts(
+      schoolContextOf(profile),
       plan.toInsert.map((insert) => ({
         insert,
         studentName: labels.get(insert.courseId)?.studentName ?? "A student",

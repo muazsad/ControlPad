@@ -17,7 +17,7 @@ export async function createModerator(
   _prev: ActionState,
   form: FormData,
 ): Promise<ActionState> {
-  await requireRole(["admin"]);
+  const profile = await requireRole(["admin"]);
 
   const fullName = text(form, "full_name");
   const email = text(form, "email");
@@ -47,6 +47,7 @@ export async function createModerator(
     fullName,
     role: "moderator",
     phone,
+    schoolId: profile.schoolId,
   });
 
   if (result.error) return { error: result.error, success: null };

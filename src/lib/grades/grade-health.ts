@@ -63,8 +63,9 @@ export function studentGradeHealth(input: {
       today: input.today,
       thresholdSchoolDays: input.context.staleGradeSchoolDays,
       isExpectedDay,
+      timeZone: input.context.timeZone,
     }),
-    trend: gradeTrend(course.snapshots, input.today),
+    trend: gradeTrend(course.snapshots, input.today, input.context.timeZone),
   }));
 
   const staleCourses = courses

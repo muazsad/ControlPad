@@ -3,15 +3,21 @@ import { describe, it } from "node:test";
 
 import {
   decideDedupe,
-  getSmsConfig,
   maskPhone,
   MAX_FAILED_SEND_ATTEMPTS,
   sendSms,
   type RecentNotification,
+  type SmsConfig,
   type SmsDatabase,
 } from "./send-sms";
 
+const twilio = { accountSid: "AC123", authToken: "token", fromPhone: "+14135559999" };
+const offConfig = async (): Promise<SmsConfig> => ({ mode: "off", reason: "Texting isn't set up yet.", twilio: null, testNumber: null });
+const liveConfig = async (): Promise<SmsConfig> => ({ mode: "live", reason: "live", twilio, testNumber: null });
+const testConfig = async (): Promise<SmsConfig> => ({ mode: "test", reason: "test", twilio, testNumber: "+14135550000" });
+
 type NotificationRow = {
+  school_id?: string;
   recipient_phone: string;
   recipient_type: string;
   student_id: string | null;
@@ -62,7 +68,7 @@ class FakeSmsDatabase implements SmsDatabase {
 
   updates: { id: string; patch: Record<string, unknown> }[] = [];
 
-  async updateNotification(id: string, patch: Record<string, unknown>) {
+  async updateNotification(_schoolId: string, id: string, patch: Record<string, unknown>) {
     this.updates.push({ id, patch });
     return { id, ...patch };
   }
@@ -84,6 +90,7 @@ describe("sendSms", () => {
 
     const result = await sendSms(
       {
+        schoolId: "school-1",
         recipientPhone: "+14135550100",
         recipientType: "admin",
         studentId: "student-1",
@@ -96,7 +103,7 @@ describe("sendSms", () => {
           fetchCalled = true;
           throw new Error("fetch should not run");
         },
-        env: {},
+        getConfig: offConfig,
       },
     );
 
@@ -105,11 +112,12 @@ describe("sendSms", () => {
     assert.equal(fetchCalled, false);
   });
 
-  it("logs a dry-run notification when Twilio env vars are missing", async () => {
+  it("logs a dry-run notification when the school has no texting set up", async () => {
     const database = new FakeSmsDatabase();
 
     const result = await sendSms(
       {
+        schoolId: "school-1",
         recipientPhone: "+14135550100",
         recipientType: "admin",
         studentId: "student-1",
@@ -121,7 +129,7 @@ describe("sendSms", () => {
         fetch: async () => {
           throw new Error("fetch should not run without env vars");
         },
-        env: {},
+        getConfig: offConfig,
       },
     );
 
@@ -129,14 +137,8 @@ describe("sendSms", () => {
     assert.equal(database.rows.length, 1);
     assert.equal(database.rows[0].status, "dry_run");
     assert.equal(database.rows[0].delivery_mode, "off");
-    assert.match(database.rows[0].error ?? "", /not configured/i);
+    assert.match(database.rows[0].error ?? "", /isn't set up/i);
   });
-
-  const twilioEnv = {
-    TWILIO_ACCOUNT_SID: "AC123",
-    TWILIO_AUTH_TOKEN: "token",
-    TWILIO_PHONE_NUMBER: "+14135559999",
-  };
 
   it("redirects every message to SMS_TEST_NUMBER in test mode", async () => {
     const database = new FakeSmsDatabase();
@@ -144,6 +146,7 @@ describe("sendSms", () => {
 
     const result = await sendSms(
       {
+        schoolId: "school-1",
         recipientPhone: "+14135550101",
         recipientType: "parent",
         studentId: "student-1",
@@ -152,7 +155,7 @@ describe("sendSms", () => {
       },
       {
         database,
-        env: { ...twilioEnv, SMS_MODE: "test", SMS_TEST_NUMBER: "+14135550000" },
+        getConfig: testConfig,
         fetch: (async (_url: string, init: RequestInit) => {
           sentBody = init.body as URLSearchParams;
           return new Response(JSON.stringify({ sid: "SM1" }), { status: 201 });
@@ -185,6 +188,7 @@ describe("sendSms", () => {
     const send = (key: string) =>
       sendSms(
         {
+          schoolId: "school-1",
           recipientPhone: "+14135550100",
           recipientType: "admin",
           studentId: null,
@@ -192,7 +196,7 @@ describe("sendSms", () => {
           body: "Batch",
           dedupeKey: key,
         },
-        { database, env: {} },
+        { database, getConfig: offConfig },
       );
 
     assert.equal((await send("absence_review:2026-10-12:g1")).status, "duplicate");
@@ -200,6 +204,7 @@ describe("sendSms", () => {
   });
 
   const lowGradeAlert = {
+    schoolId: "school-1",
     recipientPhone: "+14135550101",
     recipientType: "parent" as const,
     studentId: "student-1",
@@ -218,16 +223,22 @@ describe("sendSms", () => {
   const okFetch = (async () =>
     new Response(JSON.stringify({ sid: "SM2" }), { status: 201 })) as unknown as typeof fetch;
 
+  it("logs the text in the sending school's notifications", async () => {
+    const database = new FakeSmsDatabase([]);
+    await sendSms(lowGradeAlert, { database, getConfig: liveConfig, fetch: okFetch });
+    assert.equal(database.rows[0].school_id, "school-1");
+  });
+
   it("does not let an earlier dry run block a real send", async () => {
     const database = new FakeSmsDatabase([priorRow("dry_run", "off")]);
-    const result = await sendSms(lowGradeAlert, { database, env: twilioEnv, fetch: okFetch });
+    const result = await sendSms(lowGradeAlert, { database, getConfig: liveConfig, fetch: okFetch });
     assert.equal(result.status, "sent");
     assert.equal(database.rows.length, 2);
   });
 
   it("does not let an earlier failed send block a retry", async () => {
     const database = new FakeSmsDatabase([priorRow("failed")]);
-    const result = await sendSms(lowGradeAlert, { database, env: twilioEnv, fetch: okFetch });
+    const result = await sendSms(lowGradeAlert, { database, getConfig: liveConfig, fetch: okFetch });
     assert.equal(result.status, "sent");
   });
 
@@ -236,7 +247,7 @@ describe("sendSms", () => {
       const database = new FakeSmsDatabase([priorRow(status)]);
       const result = await sendSms(lowGradeAlert, {
         database,
-        env: twilioEnv,
+        getConfig: liveConfig,
         fetch: (async () => {
           throw new Error("fetch should not run");
         }) as typeof fetch,
@@ -247,14 +258,14 @@ describe("sendSms", () => {
 
   it("dedupes dry runs against dry runs while texting is off", async () => {
     const database = new FakeSmsDatabase([priorRow("dry_run", "off")]);
-    const result = await sendSms(lowGradeAlert, { database, env: {} });
+    const result = await sendSms(lowGradeAlert, { database, getConfig: offConfig });
     assert.equal(result.status, "duplicate");
     assert.equal(database.rows.length, 1);
   });
 
   it("does not let a test-mode text block the live alert", async () => {
     const database = new FakeSmsDatabase([priorRow("sent", "test")]);
-    const result = await sendSms(lowGradeAlert, { database, env: twilioEnv, fetch: okFetch });
+    const result = await sendSms(lowGradeAlert, { database, getConfig: liveConfig, fetch: okFetch });
     assert.equal(result.status, "sent");
   });
 
@@ -264,7 +275,7 @@ describe("sendSms", () => {
     );
     const result = await sendSms(lowGradeAlert, {
       database,
-      env: twilioEnv,
+      getConfig: liveConfig,
       fetch: (async () => {
         throw new Error("fetch should not run");
       }) as typeof fetch,
@@ -275,37 +286,12 @@ describe("sendSms", () => {
 
   it("logs a new dry run after a failed send while texting is off", async () => {
     const database = new FakeSmsDatabase([priorRow("failed")]);
-    const result = await sendSms(lowGradeAlert, { database, env: {} });
+    const result = await sendSms(lowGradeAlert, { database, getConfig: offConfig });
     assert.equal(result.status, "dry_run");
   });
 });
 
-describe("getSmsConfig", () => {
-  const twilio = {
-    TWILIO_ACCOUNT_SID: "AC123",
-    TWILIO_AUTH_TOKEN: "token",
-    TWILIO_PHONE_NUMBER: "+14135559999",
-  };
-
-  it("is off until Twilio is configured", () => {
-    assert.equal(getSmsConfig({}).mode, "off");
-    assert.equal(getSmsConfig({ SMS_MODE: "live" }).mode, "off");
-  });
-
-  it("defaults to live once Twilio is configured", () => {
-    assert.equal(getSmsConfig(twilio).mode, "live");
-  });
-
-  it("honours off and test, and requires a test number for test", () => {
-    assert.equal(getSmsConfig({ ...twilio, SMS_MODE: "off" }).mode, "off");
-    assert.equal(getSmsConfig({ ...twilio, SMS_MODE: "test" }).mode, "off");
-    assert.equal(
-      getSmsConfig({ ...twilio, SMS_MODE: "test", SMS_TEST_NUMBER: "+14135550000" }).mode,
-      "test",
-    );
-    assert.equal(getSmsConfig({ ...twilio, SMS_MODE: "bogus" }).mode, "off");
-  });
-
+describe("maskPhone", () => {
   it("masks phone numbers", () => {
     assert.equal(maskPhone("+14135550101"), "•••0101");
   });

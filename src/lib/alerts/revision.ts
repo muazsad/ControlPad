@@ -13,6 +13,7 @@ import { getServiceSchoolCalendar } from "@/lib/schedule/calendar-data";
 import { isSchoolDay, type SchoolCalendarConfig } from "@/lib/schedule/calendar";
 import { sendSms, type SendSmsInput, type SmsResult } from "@/lib/sms/send-sms";
 import { createServiceClient } from "@/lib/supabase/server";
+import type { SchoolContext } from "@/lib/schools/school-context";
 
 // Daily "revision overdue" texts, run from the attendance tick next to the
 // Quran inactivity check. One SMS per student (to parents + admin) listing the
@@ -57,7 +58,7 @@ type StudentRow = {
   juz_tests: JuzTestRow[] | null;
 };
 
-export function createSupabaseRevisionAlertDatabase(): RevisionAlertDatabase {
+export function createSupabaseRevisionAlertDatabase(ctx: SchoolContext): RevisionAlertDatabase {
   const supabase = createServiceClient();
 
   return {
@@ -65,18 +66,19 @@ export function createSupabaseRevisionAlertDatabase(): RevisionAlertDatabase {
       const { data, error } = await supabase
         .from("settings")
         .select("revision_overdue_school_days")
-        .eq("id", 1)
+        .eq("school_id", ctx.schoolId)
         .single();
       if (error) throw new Error(error.message);
       return Number(data.revision_overdue_school_days ?? DEFAULT_REVISION_OVERDUE_SCHOOL_DAYS);
     },
     async getSchoolCalendar() {
-      return getServiceSchoolCalendar();
+      return getServiceSchoolCalendar(ctx.schoolId);
     },
     async getAdminRecipients() {
       const { data, error } = await supabase
         .from("profiles")
         .select("full_name, phone")
+        .eq("school_id", ctx.schoolId)
         .eq("role", "admin")
         .not("phone", "is", null);
       if (error) throw new Error(error.message);
@@ -89,6 +91,7 @@ export function createSupabaseRevisionAlertDatabase(): RevisionAlertDatabase {
         .select(
           "id, first_name, last_name, student_memorized_juz(juz, marked_at), quran_progress(date, lesson_type, juz), student_guardians(guardians(full_name, phone)), juz_tests(juz, started_on, finished_on)",
         )
+        .eq("school_id", ctx.schoolId)
         .eq("enrollment_status", "active")
         .neq("quran_progress.lesson_type", "sabaq");
       if (error) throw new Error(error.message);
@@ -111,10 +114,11 @@ export function createSupabaseRevisionAlertDatabase(): RevisionAlertDatabase {
 }
 
 export async function checkRevisionOverdueAlerts(
+  ctx: SchoolContext,
   asOfDate: string,
   deps: Deps = {},
 ): Promise<RevisionAlertResult> {
-  const database = deps.database ?? createSupabaseRevisionAlertDatabase();
+  const database = deps.database ?? createSupabaseRevisionAlertDatabase(ctx);
   const send = deps.sendSms ?? sendSms;
   const [threshold, calendar] = await Promise.all([
     database.getRevisionOverdueSchoolDays(),
@@ -149,6 +153,7 @@ export async function checkRevisionOverdueAlerts(
     const body = revisionOverdueMessage(
       student.name,
       overdue.map((status) => status.juz),
+      ctx.smsName,
     );
     const recipients = [
       ...student.guardians.map((r) => ({ phone: r.phone, type: "parent" as const })),
@@ -157,6 +162,7 @@ export async function checkRevisionOverdueAlerts(
     for (const recipient of recipients) {
       if (!recipient.phone) continue;
       messages.push({
+        schoolId: ctx.schoolId,
         recipientPhone: recipient.phone,
         recipientType: recipient.type,
         studentId: student.id,

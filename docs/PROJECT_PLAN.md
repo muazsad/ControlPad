@@ -1,17 +1,17 @@
-# Salaam Institute — ControlPad
+# ControlPad
 
 **Master project plan & source of truth**
-Springfield, MA · Last updated: October 2026
+Built for Salaam Institute (Springfield, MA); multi-school since November 2026 · Last updated: November 2026
 
 > This document is the single source of truth for ControlPad. `CLAUDE.md`, `DATA_MODEL.md`, and any feature specs derive from it. When scope changes, change it here first.
 >
-> **Current state:** All 8 original build phases are done, plus several post-roadmap features (§9). The app is in maintenance + improvement mode. Known gaps and the next-up list are in §10 — read that before starting new work.
+> **Current state:** All 8 original build phases are done, plus several post-roadmap features (§9). Since November 2026 ControlPad is **multi-school**: anyone can sign up, create a school and use every feature, with each school's data isolated by the database (§3.0). Known gaps and the next-up list are in §10 — read that before starting new work.
 
 ---
 
 ## 1. What ControlPad is
 
-Salaam Institute students attend an external online school, **GCVS**, on-site under staff supervision. The problem: teachers and parents have **no visibility into GCVS**, so a student's grades can drop badly before anyone notices.
+ControlPad was built for Salaam Institute, whose students attend an external online school, **GCVS**, on-site under staff supervision. The problem: teachers and parents have **no visibility into GCVS**, so a student's grades can drop badly before anyone notices.
 
 ControlPad is the school's own layer on top of GCVS. It does **not** integrate with GCVS (no API access). Staff enter the key data into ControlPad, and ControlPad provides:
 
@@ -32,12 +32,21 @@ Guiding principle: **catch problems early and notify the right person automatica
 | **Parent** | Guardians | View **only their own children's** grades, attendance, Quran progress, and payment status (current month). Primary channel is **SMS**; a web login is **optional**. |
 
 - A guardian can have multiple children; a child can have multiple guardians (many-to-many via `student_guardians`).
-- **Account creation:** the admin creates moderator accounts from **/staff**, and creates an optional parent login from a guardian's page (**/guardians/[id]**). New users finish their profile at **/setup-profile**.
+- **Platform admin** (the ControlPad owner; `platform_admins`): sees `/platform` — every school's name, counts and texting state — and approves live texting. No access to any school's data.
+- **Account creation:** a new school's first admin signs up at **/signup** and creates the school at **/onboarding**. The admin then creates moderator accounts from **/staff** and optional parent logins from a guardian's page (**/guardians/[id]**); those logins belong to the admin's school. **One school per login**: an email already used at another school is refused.
 - **Access control** is enforced in the database with Supabase Row Level Security (RLS), so a parent can never read another family's data even if the front end has a bug. Roles are also checked server-side in every action (`requireRole`).
 
 ---
 
 ## 3. Modules (all built)
+
+### 3.0 Schools, sign-up & onboarding (Nov 2026)
+- **Tenancy:** one database; every school's rows carry `school_id`, every RLS policy checks it against `current_school_id()` (the signed-in user's school), and composite foreign keys stop a row pointing at another school's student. Service-role code (crons, SMS, the Twilio webhook) takes a `SchoolContext` (`lib/schools/school-context.ts`: id, name, `smsName`, `timeZone`) and filters every query by school. Spec: `docs/superpowers/specs/2026-11-03-multi-tenancy-design.md`.
+- **Sign-up:** `/signup` (email + password, confirmation email) → `/onboarding` (school name, name on texts, time zone, your name + phone) → `create_school()` makes the school, its settings rows and the caller its admin → dashboard with a **"Get your school ready"** checklist (schedule group, teachers, students, parents, Twilio).
+- **Settings → School:** name, name on texts (the prefix on every text, e.g. "Salaam Institute: …"), time zone (US zones; every local time and date in the app follows it).
+- **Settings → Texting:** the school's own Twilio (§3.6).
+- **`/platform`** (platform admins): list of schools with staff/student counts and texting state; **Approve live** / **Revoke**.
+- **Existing data:** everything from before Nov 2026 sits in a hidden "Pre-multi-tenant archive" school; Salaam Institute is recreated through onboarding. `scripts/delete-archive-school.mjs` (owner-run) deletes the archive.
 
 ### 3.1 Students & guardians
 - Student profiles: name, date of birth, grade level, enrollment status (active / inactive / withdrawn), GCVS reference, linked guardians.
@@ -49,7 +58,7 @@ Guiding principle: **catch problems early and notify the right person automatica
 - Courses are **per student** (mirroring their GCVS courses). Classes can be managed from `/grades` or directly from the student profile.
 - Grades are **append-only snapshots** — history is kept so a downward *trend* can be detected, not just an absolute low.
 - `/grades` is a student list; `/grades/[courseId]` shows a course's history.
-- **Weekly grade sweep (`/grades/sweep`, admin + moderator; "Weekly sweep" button on `/grades`):** one keyboard-driven table of every course of every *active* student (grouped by student, A–Z) so one teacher can update all current GCVS grades in ~10 minutes. Columns: Student | Course | Last grade (value + date, or "never") | New grade | status chip. Filters (schedule group, name search, "only not updated in the last 7 days") only hide rows — typed values are kept and hidden rows are still saved. Progress line: "X of Y courses updated in the last 7 days" ("last 7 days" = today + the previous 6 **Eastern** days; it comes from server data and changes only after a save). Keys: Enter/Tab/↓ next, Shift+Enter/Shift+Tab/↑ previous, Esc clears; inputs accept 0–100 with one decimal. One **Save sweep** → `saveGradeSweep()` in `app/grades/actions.ts`, which reloads the courses and each course's latest grade itself, then runs `planSweep()` (`lib/grades/sweep.ts`): blanks dropped, values rounded to 1 decimal, unchanged grades skipped (no duplicate snapshot, so `85` = `85.0`), invalid/unknown courses rejected. The rest go in as one batch insert, then `checkLowGradeAlert` runs per inserted grade (failures never fail the save). Unsaved entries are kept as a `localStorage` draft (per user + Eastern date) and a `beforeunload` warning guards the page. Spec: `docs/superpowers/specs/2026-10-11-weekly-grade-sweep-design.md`.
+- **Weekly grade sweep (`/grades/sweep`, admin + moderator; "Weekly sweep" button on `/grades`):** one keyboard-driven table of every course of every *active* student (grouped by student, A–Z) so one teacher can update all current GCVS grades in ~10 minutes. Columns: Student | Course | Last grade (value + date, or "never") | New grade | status chip. Filters (schedule group, name search, "only not updated in the last 7 days") only hide rows — typed values are kept and hidden rows are still saved. Progress line: "X of Y courses updated in the last 7 days" ("last 7 days" = today + the previous 6 **school-local** days; it comes from server data and changes only after a save). Keys: Enter/Tab/↓ next, Shift+Enter/Shift+Tab/↑ previous, Esc clears; inputs accept 0–100 with one decimal. One **Save sweep** → `saveGradeSweep()` in `app/grades/actions.ts`, which reloads the courses and each course's latest grade itself, then runs `planSweep()` (`lib/grades/sweep.ts`): blanks dropped, values rounded to 1 decimal, unchanged grades skipped (no duplicate snapshot, so `85` = `85.0`), invalid/unknown courses rejected. The rest go in as one batch insert, then `checkLowGradeAlert` runs per inserted grade (failures never fail the save). Unsaved entries are kept as a `localStorage` draft (per user + school-local date) and a `beforeunload` warning guards the page. Spec: `docs/superpowers/specs/2026-10-11-weekly-grade-sweep-design.md`.
 - **Course pace & missing work (early warning):** each grade snapshot can also carry GCVS **% complete** and **missing assignments** (blank fields carry forward the last known value, so history is never nulled). Pace logic is in `lib/grades/pace.ts`: the course window is the course's own start/end dates (optional override) or the **term dates** (Settings → Term & pace); *expected %* = the student's expected school days elapsed ÷ total in the window (their own group days, breaks and special days — breaks don't inflate it); *gap* = expected − actual; tone is success below `pace_gap_threshold`, warning at it, danger at 2×. The sweep grid, the single-course form and the student-profile editor all take the two fields; a snapshot is inserted if any of grade / % / missing changed, and the low-grade alert runs only when the grade itself changed. `/grades/[courseId]` charts actual vs expected pace and edits the course dates; the student profile shows a pace bar and missing count per course; `/grades` shows a per-student Pace badge.
 - **Stale data (staff only, no SMS):** a course is *stale* when its latest snapshot is more than `settings.stale_grade_school_days` of the **student's own** school days old (breaks and no-school days don't count), and *never graded* when it has no snapshot and was added longer ago than that (`lib/grades/staleness.ts`). Staff see a neutral **Stale** badge (tooltip: "Biology: no update in 12 school days") on the Grades and Students lists; if *all* of a student's courses are stale the performance cell reads **Stale data** instead of a score that looks healthy. In the weekly sweep, stale rows float to the top, are highlighted, and a "Stale only" filter is available. Parents never see this.
 - **Grade trends (a view, not an alert):** `gradeTrend()` (`lib/grades/trend.ts`) = latest grade minus a baseline — the latest snapshot on or before (today − `TREND_WINDOW_DAYS` = 14 calendar days), else the earliest snapshot inside the window when there are at least 2, else none. `/grades?view=drops` ("Dropping fastest") ranks students by their worst course change with before → after, the change (danger at −10 or worse via `TREND_DANGER_CHANGE`, warning for any smaller drop), a sparkline and the average change. Data comes from the same single `getAllStudentMetrics()` query (every snapshot per course).
@@ -84,7 +93,8 @@ Guiding principle: **catch problems early and notify the right person automatica
 
 ### 3.6 Notifications / SMS engine
 - Every SMS goes through `lib/sms/send-sms.ts` (Twilio) and is written to the `notifications` table (recipient, body, trigger, student, status, Twilio SID, error, delivery mode).
-- **Modes** (`SMS_MODE` env): `off` (log only, status `dry_run` — the default until Twilio keys exist), `test` (every text goes to `SMS_TEST_NUMBER`, prefixed with the intended recipient), `live`.
+- **Each school brings its own Twilio** (Settings → Texting): Account SID, Auth Token (stored AES-256-GCM encrypted with `SMS_CREDENTIALS_KEY`, never shown again), number, test number. **Save & verify** checks the details with Twilio and that the number is on that account.
+- **Modes per school:** `off` (log only, status `dry_run` — the default until the school verifies Twilio), `test` (every text goes to the school's test number, prefixed with the intended recipient), `live` (needs a platform admin's approval on `/platform`; until then a school asking for live gets test). The env `SMS_MODE` is an emergency ceiling for every school (`off` or `test`). Logic: `resolveSmsConfig()` in `lib/sms/school-sms-config.ts`.
 - **Messages page (`/messages`, admin):** texting status, a "send me a test text" button, and the log of every message sent or that would have been sent.
 - Before sending, alerts check `notifications` to avoid duplicates (same recipient + student + trigger in the window, or an explicit `dedupe_key` for batched admin texts).
 - Trigger types: `low_grade`, `absence`, `absence_review`, `tardy_threshold`, `quran_slip`, `payment_overdue`, `admin_digest`, `manual_test`, `special_day`, `absence_report_reply`, `parent_message`, `pace_behind`, `missing_assignments`, `revision_overdue`.
@@ -92,7 +102,7 @@ Guiding principle: **catch problems early and notify the right person automatica
 
 ### 3.6a Parent-reported absences (incoming texts)
 - Parents text the school number (e.g. "Amina sick today"). Twilio posts to `/api/sms/inbound` (signature-checked); `handleInboundSms()` in `lib/absence-reports/inbound.ts` logs it to `inbound_messages` and decides (pure logic in `lib/absence-reports/parse.ts`):
-  - **Absence** (sick, absent, not coming, appointment, …) for a clear child (only child, named, or "both/all") → `absence_reports` row (one per student per date), status **pending**; parent gets an acknowledgement. Date: "tomorrow" / "today"; with neither, today — or tomorrow if sent after 6 PM Eastern.
+  - **Absence** (sick, absent, not coming, appointment, …) for a clear child (only child, named, or "both/all") → `absence_reports` row (one per student per date), status **pending**; parent gets an acknowledgement. Date: "tomorrow" / "today"; with neither, today — or tomorrow if sent after 6 PM school time.
   - Absence but several children and none named → parent is asked which child; a reply within 2 hours completes it.
   - Anything else (thanks, running late, questions, unknown numbers) → **forwarded to admin** by SMS.
   - STOP/START/HELP → logged only (Twilio handles them).
@@ -103,18 +113,18 @@ Guiding principle: **catch problems early and notify the right person automatica
 
 ### 3.6b Announcements (admin, `/announcements`)
 - One-off text to **all parents** or the parents of chosen **schedule groups** (plus "students without a group"); each family phone once. ≤ 450 characters, "Salaam Institute: " prefixed.
-- **Send now** (confirm) or **schedule** (Eastern, 8:00 AM–6:50 PM — inside the tick's hours); scheduled ones can be cancelled. The 10-minute tick route sends due ones (`sendDueAnnouncements` in `lib/announcements/send.ts`); a claim step prevents double sends.
+- **Send now** (confirm) or **schedule** (school time, 8:00 AM–6:50 PM); scheduled ones can be cancelled. The 10-minute tick route sends due ones (`sendDueAnnouncements` in `lib/announcements/send.ts`); a claim step prevents double sends.
 - Goes through `sendSms()` (trigger `announcement`, so `SMS_MODE` applies); history with results on the page. Spec: `docs/superpowers/specs/2026-10-11-announcements-design.md`.
 
 ### 3.7 Admin dashboard, daily digest & escalation
 - **Dashboard (`/`)**: summary cards and today's problems — absences/tardies, low or dropping grades, **behind pace**, **missing work**, **stale data** and **biggest drops (14 days)** (top 5), Quran slippage, overdue payments — with severity ordering (`lib/alerts/admin-dashboard-severity.ts`).
 - **Critical students escalation**: scores each student over a rolling 30-day window across grades, attendance, Quran, payments, and (from each course's latest snapshot) behind-pace and missing-work → `ok` / `watch` / `critical`. Logic in `lib/people/escalation.ts` (all tunable constants at the top of that file).
-- **Daily digest**: SMS summary to admin(s) (includes a "N courses not updated in 10+ school days" line) at `settings.admin_digest_time` (Eastern), triggered by the 10-minute attendance tick; skipped on no-school days. `/api/cron/admin-digest` supports `?force=1` and `?date=YYYY-MM-DD` for manual runs.
+- **Daily digest**: SMS summary to admin(s) (includes a "N courses not updated in 10+ school days" line) at `settings.admin_digest_time` (school time), triggered by the 10-minute attendance tick; skipped on no-school days. `/api/cron/admin-digest` supports `?force=1` and `?date=YYYY-MM-DD` for manual runs.
 - **Staff checklist** (dashboard): for today, each responsible teacher's attendance (`marked/expected`, missing once past the student's tardy cutoff) and Quran (`logged/expected`; expected every school day the student attends, unless absent/excused), with the missing students named. Ungrouped students and groups without a teacher show as "No teacher assigned". Unmarked students with a parent absence report are left to the admin. Logic in `lib/people/staff-accountability.ts`. No SMS.
 - Parents see a simplified "My children" dashboard instead.
 
 ### 3.8 Settings & school calendar (admin only, `/settings`)
-Thresholds — all read from the single-row `settings` table, never hardcoded:
+Thresholds — all read from the school's row in `settings`, never hardcoded:
 
 | Setting | Default |
 |---|---|
@@ -153,7 +163,7 @@ School calendar:
 | Frontend & hosting | **Next.js 16 (App Router) + React 19 + TypeScript on Vercel** | Auto-deploys from GitHub (`muazsad/ControlPad`). |
 | UI | **Tailwind v4 + shadcn/ui**, lucide icons, sonner toasts, Recharts | No other component libraries. Design rules in `CLAUDE.md`. |
 | Database, auth | **Supabase** (Postgres + Auth + RLS) via `@supabase/ssr` | Separate server and browser clients. |
-| SMS | **Twilio** | Env: `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_PHONE_NUMBER`, `SMS_MODE`, `SMS_TEST_NUMBER`. |
+| SMS | **Twilio**, each school's own account | Per school in `school_sms_config` (Settings → Texting). Env: `SMS_CREDENTIALS_KEY` (encrypts tokens), optional `SMS_MODE` ceiling, optional `TWILIO_INBOUND_URL`. |
 | Scheduled jobs | **Vercel Cron** (daily) + **Supabase pg_cron** (every 10 min) → protected API routes | Require `Authorization: Bearer $CRON_SECRET`. Vercel is on the **Hobby** plan (once-a-day crons only). |
 | Tests | Node built-in test runner + `tsx` | `npm test`. |
 | Payments (future) | **Stripe** | Not built. |
@@ -167,7 +177,7 @@ School calendar:
 
 | Route | Runs from | Schedule | Notes |
 |---|---|---|---|
-| `/api/cron/attendance-tick` | Supabase pg_cron | every 10 min, 10:00–23:50 UTC | Absence escalation + tardy check (per student's own schedule), due scheduled announcements, the daily Quran check at 11:00 Eastern (`QURAN_CHECK_TIME`), tomorrow's special-day parent text at 6:00 PM Eastern (`SPECIAL_DAY_NOTICE_TIME`), and the daily admin digest at `admin_digest_time` Eastern. Needs Vault secrets (SETUP §5). |
+| `/api/cron/attendance-tick` | Supabase pg_cron | every 10 min, around the clock; each school on its own local time | Absence escalation + tardy check (per student's own schedule), due scheduled announcements, the daily Quran check at 11:00 school time (`QURAN_CHECK_TIME`), tomorrow's special-day parent text at 6:00 PM school time (`SPECIAL_DAY_NOTICE_TIME`), and the daily admin digest at `admin_digest_time` school time. Needs Vault secrets (SETUP §5). |
 | `/api/cron/payment-overdue` | Vercel | daily 15:30 UTC | Only acts after `payment_due_day`. |
 | `/api/cron/tardy-threshold`, `/api/cron/quran-slip`, `/api/cron/admin-digest` | manual only | — | Run by attendance-tick now; kept for manual runs (`?force=1` on the digest). |
 
@@ -193,8 +203,12 @@ Full schema in `DATA_MODEL.md` and `supabase/migrations/`:
 | `20261014000000_announcements.sql` | `announcements` (admin-only RLS); trigger `announcement` |
 | `20261015000000_stale_grade_setting.sql` | `settings.stale_grade_school_days` (default 10, 1–90). Additive. |
 | `20261016000000_quran_lesson_types.sql` | `quran_lesson_type` enum; `quran_progress.lesson_type` (default `sabaq`) + `juz`; `student_memorized_juz` (RLS copies `quran_progress`); `settings.revision_overdue_school_days` (default 21); `revision_overdue` trigger. Additive. **Must be applied before this code is deployed.** |
+| `20261103000000_schools.sql` | Multi-school: `schools`, `school_sms_config` (service role only), `platform_admins`, `profiles.school_id`, `current_school_id()`; the archive school; every profile moved into it |
+| `20261103000100_school_id_columns.sql` | `school_id` on every school table (backfilled to the archive), composite FKs, per-school keys for `settings`, `school_weekly_patterns`, `school_special_days`, `schedule_groups.name` |
+| `20261103000200_tenant_rls.sql` | `user_role()` / parent helpers scoped to the school, `create_school()`, every policy recreated with `school_id = current_school_id()`; `profiles_own_insert` removed |
+| `20261103000300_tick_all_day.sql` | The 10-minute tick runs around the clock. **All four must be tested on a copy first (SETUP §9) and applied right before the code deploys.** |
 
-Core tables: `profiles` (role), `students`, `guardians`, `student_guardians`, `courses`, `grades`, `attendance`, `quran_progress`, `payments`, `settings` (single row), `notifications`, the three calendar tables, and `schedule_groups` + `schedule_group_days`.
+Core tables: `schools`, `profiles` (role + school), `students`, `guardians`, `student_guardians`, `courses`, `grades`, `attendance`, `quran_progress`, `payments`, `settings` (one row per school), `notifications`, the three calendar tables, and `schedule_groups` + `schedule_group_days`.
 
 ---
 
@@ -205,22 +219,28 @@ Core tables: `profiles` (role), `students`, `guardians`, `student_guardians`, `c
 ```
 src/
   app/                    one folder per nav tab: students, guardians, grades, top-performers,
-                          attendance, quran, tuition, announcements, messages, staff, settings; plus login, auth/callback,
-                          setup-profile. Mutations live in each folder's actions.ts (server actions).
+                          attendance, quran, tuition, announcements, messages, staff, settings; plus login, signup,
+                          onboarding, platform, auth/callback, setup-profile (now a redirect to onboarding).
+                          Mutations live in each folder's actions.ts (server actions).
   app/page.tsx            Dashboard (admin/moderator) or "My children" (parent)
-  app/api/cron/           Protected cron routes + _utils.ts (requireCronSecret, cronDateParam)
+  app/api/cron/           Protected cron routes + _utils.ts (requireCronSecret, cronDateParam, cronSchools);
+                          each route loops schools with forEachSchool()
   components/ui/          shadcn primitives
   components/controlpad/  AppShell, StatusBadge, SummaryCard, DataTable, EmptyState, PageHeader, …
   lib/supabase/           server.ts, client.ts, middleware.ts
-  lib/auth/               current-profile.ts (requireRole), admin-accounts.ts
-  lib/sms/                send-sms.ts — the only Twilio path
+  lib/auth/               current-profile.ts (requireRole, schoolContextOf), admin-accounts.ts, platform-admin.ts
+  lib/schools/            school-context (SchoolContext, withSchoolPrefix), schools-data, for-each-school,
+                          clock (localClock/localDate/localTimeToUtc), time-zones, onboarding-validation,
+                          setup-checklist, platform-data, tenant-tables.mjs (list used by the static tests)
+  lib/sms/                send-sms.ts — the only Twilio path; school-sms-config (effective mode per school),
+                          credentials-crypto, twilio-verify, inbound-auth, texting-validation, texting-view
   lib/absence-reports/    parse.ts (pure: is it an absence, which child, which day), inbound.ts
                           (handleInboundSms), review.ts, reports-data.ts
   lib/announcements/      announcements.ts (pure, client-safe), send.ts (claim + send, due ones)
   app/api/sms/inbound/    Twilio incoming-text webhook (signature-checked, public path)
   lib/alerts/             grades, attendance (tardy threshold), attendance-escalation (tick),
                           quran, payment, payment-overdue, admin-digest, admin-dashboard-severity
-  lib/grades/             sweep (pure parse/plan/Eastern-window logic), sweep-data (latest snapshot per course),
+  lib/grades/             sweep (pure parse/plan/school-local window logic), sweep-data (latest snapshot per course),
                           pace (pure expected-pace logic), pace-data (term/thresholds/calendar loader),
                           staleness, trend, grade-health (per-student rollup)
   lib/people/             performance, student-metrics, escalation, quran-progress, people,
@@ -231,7 +251,9 @@ src/
 supabase/migrations/      All schema changes
 scripts/seed.mjs          Seed data (`npm run seed`)
 scripts/audit-launch-readiness.mjs   Static checks on RLS/security before launch
-tests/                    RLS policy recursion test
+tests/                    Static tests: RLS policy recursion, tenant RLS, school-scoped service-role queries
+supabase/tests/           pgTAP tenant isolation test (`supabase test db`, needs Docker)
+scripts/delete-archive-school.mjs    Owner-run deletion of the pre-multi-school archive
 docs/                     PROJECT_PLAN (this), DATA_MODEL, SETUP, BUILD_PROMPTS,
                           superpowers/ (per-feature specs + implementation plans)
 ```
@@ -282,6 +304,9 @@ ControlPad holds **children's educational records and family phone numbers**:
 - Configurable school calendar (weekly pattern, breaks, special days), calendar-aware alerts
 - Graceful handling when calendar tables are missing
 
+**November 2026:**
+- Nov 3: **Multi-school** — sign-up and onboarding, `school_id` + school-checked RLS on every table, crons and alerts per school, each school's time zone and text name, each school's own Twilio (encrypted, verified, live after platform approval), `/platform`, School/Texting settings, setup checklist (§3.0, §3.6)
+
 **October 2026:**
 - Schedule groups (per-group weekdays, start, tardy grace, absence check)
 - Arrival-time attendance ("Arrived now"), tardy decided from the student's group
@@ -304,6 +329,13 @@ ControlPad holds **children's educational records and family phone numbers**:
 ---
 
 ## 10. Known gaps & next up
+
+**Multi-school release (Nov 3, 2026) — on branch `feat/multi-tenant`, not merged or applied:**
+- Owner steps before/at release, in order: SETUP §9 (test the migrations on a copy + `supabase test db`), add `SMS_CREDENTIALS_KEY` (SETUP §4), custom SMTP + redirect URLs (SETUP §8), `supabase db push` and deploy together, add yourself to `platform_admins` (SETUP §7), recreate Salaam Institute via onboarding and enter its Twilio in Settings → Texting, then run `scripts/delete-archive-school.mjs --with-logins` so old staff/parent emails can be re-added. Then delete the old `TWILIO_*` / `SMS_TEST_NUMBER` env vars.
+- PR muazsad/ControlPad#7 (`juz_tests`): if it merges after the multi-school migrations are applied, its migration must add `school_id`, the composite FK and school-checked policies itself.
+- Known limits: one school per login; one tick loops schools in turn (fine for tens of schools — fan out at hundreds); rotating `SMS_CREDENTIALS_KEY` needs a re-encrypt script (not built); `schedule_groups.teacher_id` isn't tied to the school by a composite FK (RLS and the picker keep it in-school).
+
+The status below predates the multi-school work.
 
 **Current status (Oct 11, 2026):**
 - Production: <https://control-pad.vercel.app> (Vercel Hobby, deploys from `main`). Schedule groups, arrival-based attendance, the Messages page, the 10-minute attendance tick, and the new special days are live and verified. **The three Oct 11 features below are not on `main` yet, so they are not in production.**
@@ -356,3 +388,4 @@ Claude never creates accounts or handles credentials. The owner:
 4. **School week** — Mon–Thu + Sat; Fri and Sun off (editable). ✅
 5. **Global performance excludes attendance**; attendance only counts on Top Performers. ✅
 6. **Grades are append-only snapshots**; courses are per student. ✅
+7. **Multi-school (Nov 3, 2026)** — one database with `school_id` + RLS; Salaam starts fresh (old data archived); each school brings its own Twilio; no billing in v1; one school per login; open sign-up with email confirmation; live texting needs platform-admin approval. ✅

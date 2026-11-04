@@ -4,7 +4,7 @@ Standing instructions for Claude Code working in this repository. Read this and 
 
 ## What this project is
 
-ControlPad is an admin/visibility/alerts web app for Salaam Institute (an Islamic school in Springfield, MA). It sits on top of an external online school (GCVS) that staff transcribe data into. Core jobs: track grades, attendance, Quran memorization, and tuition, and automatically alert parents/admin (mostly by SMS) when something slips. Full detail in `docs/PROJECT_PLAN.md`; schema in `docs/DATA_MODEL.md`.
+ControlPad is an admin/visibility/alerts web app for Islamic schools, built for Salaam Institute (Springfield, MA) and **multi-school since Nov 2026**: anyone can sign up and create a school, and each school's data is isolated by RLS. It sits on top of an external online school (GCVS) that staff transcribe data into. Core jobs: track grades, attendance, Quran memorization, and tuition, and automatically alert parents/admin (mostly by SMS) when something slips. Full detail in `docs/PROJECT_PLAN.md`; schema in `docs/DATA_MODEL.md`.
 
 ## Tech stack (do not swap without asking)
 
@@ -18,12 +18,13 @@ ControlPad is an admin/visibility/alerts web app for Salaam Institute (an Islami
 
 All app code lives under `src/` (import alias `@/` → `src/`). Full map in `docs/PROJECT_PLAN.md` §6.
 
-- `src/app/` — routes (App Router), **one folder per nav tab** (`students`, `guardians`, `grades`, `top-performers`, `attendance`, `quran`, `tuition`, `announcements`, `messages`, `staff`, `settings`), plus `login`, `auth/callback`, `setup-profile`. There are **no role route groups** — each page/action checks the role server-side with `requireRole()` from `src/lib/auth/current-profile.ts`.
+- `src/app/` — routes (App Router), **one folder per nav tab** (`students`, `guardians`, `grades`, `top-performers`, `attendance`, `quran`, `tuition`, `announcements`, `messages`, `staff`, `settings`), plus `login`, `signup`, `onboarding` (create a school), `platform` (platform admins: approve live texting), `auth/callback`, `setup-profile` (redirects to onboarding). There are **no role route groups** — each page/action checks the role server-side with `requireRole()` from `src/lib/auth/current-profile.ts`.
 - Mutations are **server actions** in each route folder's `actions.ts`.
 - `src/app/page.tsx` — admin/moderator dashboard, or the parent "My children" view.
 - `src/lib/supabase/` — separate `server.ts` and `client.ts` (browser) clients, plus `middleware.ts`. Never import the server/service-role client into a client component.
-- `src/lib/sms/send-sms.ts` — the single Twilio send module. All SMS go through here and get logged to `notifications`. Honors `SMS_MODE` (off / test / live); never bypass it.
-- `src/lib/absence-reports/` — parent-reported absences from incoming texts. `src/app/api/sms/inbound` is Twilio's webhook: public in middleware, so it **must** keep checking `X-Twilio-Signature` (`lib/sms/twilio-signature.ts`). Replies go through `sendSms()`, never TwiML.
+- `src/lib/sms/send-sms.ts` — the single Twilio send module. All SMS go through here and get logged to `notifications`. Every `sendSms()` call needs `schoolId`; it sends with **that school's own Twilio** and effective mode (`resolveSmsConfig()` in `school-sms-config.ts`: off / test / live, live only after platform approval, env `SMS_MODE` as an emergency ceiling). Never read `TWILIO_*` env vars for sending; never bypass it.
+- `src/lib/absence-reports/` — parent-reported absences from incoming texts. `src/app/api/sms/inbound` is Twilio's webhook: public in middleware, so it **must** keep checking `X-Twilio-Signature` with the receiving school's token (`lib/sms/inbound-auth.ts`; the school is the one owning the `To` number). Replies go through `sendSms()`, never TwiML.
+- `src/lib/schools/` — multi-school plumbing: `SchoolContext` (id, name, `smsName`, `timeZone`; get one with `schoolContextOf(profile)` or `listActiveSchools()`), `forEachSchool()` for crons, `clock.ts` (`localClock`/`localDate`/`localTimeToUtc` — never hard-code a time zone), `tenant-tables.mjs` (the list of school tables).
 - `src/lib/alerts/` — threshold-checking logic (grades, attendance, quran, payment, payment-overdue, admin-digest, admin-dashboard-severity).
 - `src/lib/people/` — performance metrics, student metrics, escalation, Quran progress.
 - `src/lib/schedule/` — school calendar + schedule groups. Pure logic in `calendar.ts` and `student-schedule.ts` (`scheduleForDate()` decides when a student is expected; always use it rather than reading `settings.school_start` directly); DB loading in `calendar-data.ts` and `schedule-groups-data.ts`. Time-based alerts must respect the calendar and each student's group. Special days can apply to the whole school or chosen groups (`applies_to`), close school, move start times, or pause parent attendance texts (`DaySchedule.parentAlerts`) — all handled inside `scheduleForDate()`; never re-implement special-day checks elsewhere.
@@ -35,6 +36,9 @@ All app code lives under `src/` (import alias `@/` → `src/`). Full map in `doc
 ## Security rules (non-negotiable)
 
 - **RLS on every table.** Follow the access matrix in `docs/DATA_MODEL.md`. Never disable RLS to "make it work."
+- **Every school's table has `school_id`** (`not null default public.current_school_id()`), a composite FK `(parent_id, school_id)` to its parent, and only policies that check `school_id = public.current_school_id()`. Add new tables to `src/lib/schools/tenant-tables.mjs`; `tests/tenant-rls.test.mjs` enforces this, and `supabase/tests/tenant_isolation.test.sql` checks it on a real database.
+- **Service-role code acts for one school at a time.** It takes a `SchoolContext` and filters every query on a school's table (and `profiles`) by `school_id`, and writes `school_id` on inserts. `tests/service-role-school-scope.test.mjs` enforces this; a deliberate cross-school lookup needs `// tenant-scope-ok: <reason>`. Keep service-role code in its own files so signed-in (RLS) code isn't mixed in.
+- **Twilio tokens** live encrypted in `school_sms_config` (service role only, `SMS_CREDENTIALS_KEY`). Never select the token into a page or return it to the browser.
 - The **service role key** is server-only (cron, SMS engine). Never expose it to the browser, never prefix it with `NEXT_PUBLIC_`.
 - All secrets live in environment variables (see `docs/SETUP.md`). Never hardcode or commit them. Confirm `.env*` is gitignored.
 - Always check the user's role **server-side**; never trust the client.
@@ -44,7 +48,7 @@ All app code lives under `src/` (import alias `@/` → `src/`). Full map in `doc
 
 - The original 8 build phases are complete; `docs/BUILD_PROMPTS.md` is historical. Check **§10 "Known gaps & next up"** in `docs/PROJECT_PLAN.md` before starting new work.
 - Work in small, focused changes on a branch off `main`. After each change, `npm test` and `npm run build` must pass and the app must stay deployable.
-- **Never hardcode thresholds.** Read them from the `settings` table (grade floor, tardy window, etc.).
+- **Never hardcode thresholds, school names or time zones.** Read thresholds (grade floor, tardy window, etc.) from the school's `settings` row (`.eq("school_id", …)`), and the school's name and time zone from `SchoolContext`.
 - **Every alert** is checked against `settings`, sent via `lib/sms/`, and written to `notifications`. `sendSms()` dedupes for you via `decideDedupe()` (same recipient + student + trigger, or a `dedupeKey`, within `dedupeWindowHours`): only sent/queued texts in the current SMS mode block a repeat, dry runs only block other dry runs, failed sends retry up to `MAX_FAILED_SEND_ATTEMPTS`. Pick a sensible window/key; don't add your own dedupe queries.
 - Anything that should run at a local time of day goes on the 10-minute tick (`runAttendanceTick` in `lib/alerts/attendance-escalation.ts`) with a named time constant — not a fixed-UTC Vercel cron, which shifts with daylight saving.
 - Use Supabase **migrations** for schema changes — never tell the user to paste SQL into the dashboard for permanent changes.

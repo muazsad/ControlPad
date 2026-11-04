@@ -151,7 +151,7 @@ export function formatJuzList(juz: number[], max = REVISION_SMS_MAX_JUZ): string
   return `Juz ${sorted.slice(0, max).join(", ")} and ${sorted.length - max} more`;
 }
 
-export function revisionOverdueMessage(studentName: string, juz: number[]): string {
+export function revisionOverdueMessage(studentName: string, juz: number[], smsName: string): string {
   const firstName = studentName.trim().split(/\s+/)[0] || "Your child";
-  return `Salaam Institute: ${firstName} hasn't revised ${formatJuzList(juz)} in over a month. Please encourage review at home.`;
+  return `${smsName}: ${firstName} hasn't revised ${formatJuzList(juz)} in over a month. Please encourage review at home.`;
 }

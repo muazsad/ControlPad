@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useEffect, useState } from "react";
+import { createContext, useActionState, useContext, useEffect, useState } from "react";
 import { useFormStatus } from "react-dom";
 import { MessageSquare, Save, Send, Trash2 } from "lucide-react";
 import { toast } from "sonner";
@@ -47,7 +47,12 @@ type Props = {
   groups: GroupOption[];
   /** Parent phones that would be texted, by special-day date. */
   recipientCounts: Record<string, number>;
+  smsName: string;
+  timeZone: string;
 };
+
+/** The school's text prefix and time zone, for labels deep in the form. */
+const SchoolDisplay = createContext({ smsName: "", timeZone: "UTC" });
 
 const initialState: SpecialDayFormState = { error: null, success: null };
 
@@ -251,6 +256,7 @@ function DayOptionFields({
 }
 
 function ParentMessageFields({ idPrefix, initial }: { idPrefix: string; initial?: SpecialDay }) {
+  const { smsName } = useContext(SchoolDisplay);
   const [message, setMessage] = useState(initial?.parentMessage ?? "");
   const [notify, setNotify] = useState(initial?.notifyParents ?? false);
 
@@ -280,7 +286,7 @@ function ParentMessageFields({ idPrefix, initial }: { idPrefix: string; initial?
         className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
       />
       <p className="text-xs text-muted-foreground">
-        Sent as &ldquo;Salaam Institute: …&rdquo; to parents of students this day applies to.
+        Sent as &ldquo;{smsName}: …&rdquo; to parents of students this day applies to.
       </p>
       <Checkbox
         name="notify_parents"
@@ -418,6 +424,7 @@ function EditSpecialDay({
   groups: GroupOption[];
   recipients: number;
 }) {
+  const { timeZone } = useContext(SchoolDisplay);
   const [state, action] = useActionState(saveSpecialDay.bind(null, day.date), initialState);
   const [open, setOpen] = useState(false);
   useToastOnSuccess(state);
@@ -437,7 +444,7 @@ function EditSpecialDay({
           {day.parentsNotifiedAt ? (
             <StatusBadge
               status={`Parents texted ${new Date(day.parentsNotifiedAt).toLocaleString("en-US", {
-                timeZone: "America/New_York",
+                timeZone,
                 month: "short",
                 day: "numeric",
                 hour: "numeric",
@@ -482,8 +489,9 @@ function EditSpecialDay({
   );
 }
 
-export function SpecialDaysForm({ specialDays, groups, recipientCounts }: Props) {
+export function SpecialDaysForm({ specialDays, groups, recipientCounts, smsName, timeZone }: Props) {
   return (
+    <SchoolDisplay.Provider value={{ smsName, timeZone }}>
     <Card className="border shadow-sm">
       <CardHeader>
         <CardTitle>Special days</CardTitle>
@@ -514,5 +522,6 @@ export function SpecialDaysForm({ specialDays, groups, recipientCounts }: Props)
         </div>
       </CardContent>
     </Card>
+    </SchoolDisplay.Provider>
   );
 }

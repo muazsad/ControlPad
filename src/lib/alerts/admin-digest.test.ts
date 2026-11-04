@@ -15,6 +15,14 @@ import {
 import type { SendSmsInput } from "@/lib/sms/send-sms";
 import { DEFAULT_WEEKLY_PATTERN } from "@/lib/schedule/calendar";
 import type { PaceContext } from "@/lib/grades/pace";
+import type { SchoolContext } from "@/lib/schools/school-context";
+
+const TEST_SCHOOL: SchoolContext = {
+  schoolId: "school-1",
+  name: "Test School",
+  smsName: "Test School",
+  timeZone: "America/New_York",
+};
 
 const emptySummary: AdminDailySummary = {
   date: "2026-06-27",
@@ -213,7 +221,7 @@ describe("admin digest", () => {
     ];
     const sent: SendSmsInput[] = [];
 
-    const result = await sendAdminDigest(
+    const result = await sendAdminDigest(TEST_SCHOOL, 
       {
         date: "2026-06-27",
         force: true,
@@ -244,7 +252,7 @@ describe("admin digest", () => {
   it("skips scheduled sends before settings.admin_digest_time unless forced", async () => {
     const sent: SendSmsInput[] = [];
 
-    const result = await sendAdminDigest(
+    const result = await sendAdminDigest(TEST_SCHOOL, 
       {
         date: "2026-06-27",
         now: new Date("2026-06-27T14:59:00-04:00"),
@@ -266,7 +274,7 @@ describe("admin digest", () => {
   it("skips scheduled sends on no-school days unless forced", async () => {
     const sent: SendSmsInput[] = [];
 
-    const result = await sendAdminDigest(
+    const result = await sendAdminDigest(TEST_SCHOOL, 
       {
         date: "2026-07-03",
         now: new Date("2026-07-03T16:00:00-04:00"),
@@ -347,6 +355,7 @@ describe("summarizePaceIssues", () => {
     paceGapThreshold: 10,
     missingAssignmentsThreshold: 3,
   staleGradeSchoolDays: 10,
+  timeZone: "America/New_York",
     calendar: { weeklyPattern: DEFAULT_WEEKLY_PATTERN, breaks: [], specialDays: [] },
     groups: new Map(),
     defaults: { schoolStart: "08:00", tardyWindowHours: 2 },
@@ -432,6 +441,7 @@ describe("summarizeGradeHealth", () => {
     paceGapThreshold: 10,
     missingAssignmentsThreshold: 3,
     staleGradeSchoolDays: 5,
+  timeZone: "America/New_York",
     calendar: { weeklyPattern: DEFAULT_WEEKLY_PATTERN, breaks: [], specialDays: [] },
     groups: new Map(),
     defaults: { schoolStart: "08:00", tardyWindowHours: 2 },

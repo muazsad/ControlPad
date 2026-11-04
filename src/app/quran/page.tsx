@@ -63,7 +63,7 @@ export default async function QuranPage() {
       supabase
         .from("settings")
         .select("quran_inactivity_days")
-        .eq("id", 1)
+        .eq("school_id", profile.schoolId)
         .single(),
     ]);
 
@@ -104,7 +104,11 @@ export default async function QuranPage() {
     const latestEntries = Array.from(latestMap.values());
 
     return (
-      <AppShell fullName={profile.fullName} role={profile.role}>
+      <AppShell
+        fullName={profile.fullName}
+        role={profile.role}
+        schoolName={profile.schoolName}
+      >
         <div className="mx-auto max-w-6xl space-y-6">
           <PageHeader
             title="Quran / Hifz"
@@ -141,7 +145,7 @@ export default async function QuranPage() {
     supabase
       .from("settings")
       .select("quran_inactivity_days")
-      .eq("id", 1)
+      .eq("school_id", profile.schoolId)
       .single(),
   ]);
 
@@ -189,7 +193,11 @@ export default async function QuranPage() {
   }));
 
   return (
-    <AppShell fullName={profile.fullName} role={profile.role}>
+    <AppShell
+      fullName={profile.fullName}
+      role={profile.role}
+      schoolName={profile.schoolName}
+    >
       <div className="mx-auto max-w-5xl space-y-6">
         <PageHeader
           title="Quran progress"

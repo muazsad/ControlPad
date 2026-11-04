@@ -7,6 +7,7 @@ import {
   schoolDaysSince,
   type SchoolCalendarConfig,
 } from "@/lib/schedule/calendar";
+import type { SchoolContext } from "@/lib/schools/school-context";
 
 type GuardianRecipient = {
   full_name: string;
@@ -80,7 +81,7 @@ export function evaluateQuranInactivity(input: {
   };
 }
 
-export function createSupabaseQuranAlertDatabase(): QuranAlertDatabase {
+export function createSupabaseQuranAlertDatabase(ctx: SchoolContext): QuranAlertDatabase {
   const supabase = createServiceClient();
 
   return {
@@ -88,20 +89,21 @@ export function createSupabaseQuranAlertDatabase(): QuranAlertDatabase {
       const { data, error } = await supabase
         .from("settings")
         .select("quran_inactivity_days")
-        .eq("id", 1)
+        .eq("school_id", ctx.schoolId)
         .single();
       if (error) throw new Error(error.message);
       return { quranInactivityDays: Number(data.quran_inactivity_days) };
     },
 
     async getSchoolCalendar() {
-      return getServiceSchoolCalendar();
+      return getServiceSchoolCalendar(ctx.schoolId);
     },
 
     async getAdminRecipients() {
       const { data, error } = await supabase
         .from("profiles")
         .select("full_name, phone")
+        .eq("school_id", ctx.schoolId)
         .eq("role", "admin")
         .not("phone", "is", null);
       if (error) throw new Error(error.message);
@@ -113,6 +115,7 @@ export function createSupabaseQuranAlertDatabase(): QuranAlertDatabase {
       const { data: allStudents, error: studentsError } = await supabase
         .from("students")
         .select("id, first_name, last_name")
+        .eq("school_id", ctx.schoolId)
         .eq("enrollment_status", "active");
       if (studentsError) throw new Error(studentsError.message);
 
@@ -120,6 +123,7 @@ export function createSupabaseQuranAlertDatabase(): QuranAlertDatabase {
       const { data: testRows, error: testsError } = await supabase
         .from("juz_tests")
         .select("student_id, juz, started_on, finished_on")
+        .eq("school_id", ctx.schoolId)
         .is("finished_on", null);
       if (testsError) throw new Error(testsError.message);
       const onTest = studentsOnJuzTest((testRows ?? []) as JuzTestRow[], asOfDate);
@@ -134,6 +138,7 @@ export function createSupabaseQuranAlertDatabase(): QuranAlertDatabase {
       const { data: latestRows, error: latestError } = await supabase
         .from("quran_progress")
         .select("student_id, date")
+        .eq("school_id", ctx.schoolId)
         .in("student_id", studentIds)
         // Only new memorization (sabaq) resets the inactivity clock.
         .eq("lesson_type", "sabaq")
@@ -165,6 +170,7 @@ export function createSupabaseQuranAlertDatabase(): QuranAlertDatabase {
       const { data: guardianLinks, error: guardianError } = await supabase
         .from("student_guardians")
         .select("student_id, guardians(full_name, phone)")
+        .eq("school_id", ctx.schoolId)
         .in("student_id", slippingIds);
       if (guardianError) throw new Error(guardianError.message);
 
@@ -210,10 +216,11 @@ export function createSupabaseQuranAlertDatabase(): QuranAlertDatabase {
 }
 
 export async function checkQuranSlipAlerts(
+  ctx: SchoolContext,
   asOfDate: string,
   deps: AlertDeps = {},
 ): Promise<AlertResult> {
-  const database = deps.database ?? createSupabaseQuranAlertDatabase();
+  const database = deps.database ?? createSupabaseQuranAlertDatabase(ctx);
   const send = deps.sendSms ?? sendSms;
   const [settings, calendar] = await Promise.all([
     database.getQuranSettings(),
@@ -234,13 +241,14 @@ export async function checkQuranSlipAlerts(
   for (const student of students) {
     const name = studentName(student);
     const parentBody =
-      `Salaam Institute: ${name} has not had a new Quran lesson recorded in ${student.daysSinceLastLesson} day${student.daysSinceLastLesson === 1 ? "" : "s"}. ` +
+      `${ctx.smsName}: ${name} has not had a new Quran lesson recorded in ${student.daysSinceLastLesson} day${student.daysSinceLastLesson === 1 ? "" : "s"}. ` +
       `Please reach out to the school if you have questions.`;
     const adminBody =
       `ControlPad: ${name}'s last Quran lesson was ${student.daysSinceLastLesson} day${student.daysSinceLastLesson === 1 ? "" : "s"} ago (threshold: ${settings.quranInactivityDays}).`;
 
     for (const guardian of student.guardians) {
       messages.push({
+        schoolId: ctx.schoolId,
         recipientPhone: guardian.phone,
         recipientType: "parent",
         studentId: student.id,
@@ -254,6 +262,7 @@ export async function checkQuranSlipAlerts(
     for (const admin of admins) {
       if (!admin.phone) continue;
       messages.push({
+        schoolId: ctx.schoolId,
         recipientPhone: admin.phone,
         recipientType: "admin",
         studentId: student.id,

@@ -4,6 +4,14 @@ import { describe, it } from "node:test";
 import type { SendSmsInput, SmsResult } from "@/lib/sms/send-sms";
 
 import { sendAnnouncement, sendDueAnnouncements, type AnnouncementDatabase } from "./send";
+import type { SchoolContext } from "@/lib/schools/school-context";
+
+const TEST_SCHOOL: SchoolContext = {
+  schoolId: "school-1",
+  name: "Test School",
+  smsName: "Test School",
+  timeZone: "America/New_York",
+};
 
 function fakeDb(rows: { id: string; message: string; audience: string[] | null; status: string; due: boolean }[]) {
   const finished: Record<string, unknown>[] = [];
@@ -51,11 +59,11 @@ describe("sendAnnouncement", () => {
   it("texts each family once with the school prefix and records the result", async () => {
     const db = fakeDb([{ id: "a1", message: "No school Friday", audience: null, status: "scheduled", due: false }]);
     const sms = recorder();
-    const result = await sendAnnouncement("a1", { database: db.database, sendSms: sms.sendSms, now, mode: "live" });
+    const result = await sendAnnouncement(TEST_SCHOOL, "a1", { database: db.database, sendSms: sms.sendSms, now, mode: "live" });
 
     assert.deepEqual(result, { status: "sent", recipients: 2, failed: 0, mode: "live" });
     assert.deepEqual(sms.sent.map((m) => m.recipientPhone), ["+14135550101", "+14135550202"]);
-    assert.equal(sms.sent[0].body, "Salaam Institute: No school Friday");
+    assert.equal(sms.sent[0].body, "Test School: No school Friday");
     assert.equal(sms.sent[0].triggerType, "announcement");
     assert.equal(sms.sent[0].dedupeKey, "announcement:a1");
     assert.equal(db.finished[0].status, "sent");
@@ -65,22 +73,22 @@ describe("sendAnnouncement", () => {
   it("only sends to the chosen groups", async () => {
     const db = fakeDb([{ id: "a1", message: "hi", audience: ["full"], status: "scheduled", due: false }]);
     const sms = recorder();
-    await sendAnnouncement("a1", { database: db.database, sendSms: sms.sendSms, now, mode: "live" });
+    await sendAnnouncement(TEST_SCHOOL, "a1", { database: db.database, sendSms: sms.sendSms, now, mode: "live" });
     assert.deepEqual(sms.sent.map((m) => m.recipientPhone), ["+14135550101"]);
   });
 
   it("never sends the same announcement twice", async () => {
     const db = fakeDb([{ id: "a1", message: "hi", audience: null, status: "scheduled", due: false }]);
     const sms = recorder();
-    await sendAnnouncement("a1", { database: db.database, sendSms: sms.sendSms, now, mode: "live" });
-    const again = await sendAnnouncement("a1", { database: db.database, sendSms: sms.sendSms, now, mode: "live" });
+    await sendAnnouncement(TEST_SCHOOL, "a1", { database: db.database, sendSms: sms.sendSms, now, mode: "live" });
+    const again = await sendAnnouncement(TEST_SCHOOL, "a1", { database: db.database, sendSms: sms.sendSms, now, mode: "live" });
     assert.deepEqual(again, { status: "not_claimed" });
     assert.equal(sms.sent.length, 2);
   });
 
   it("marks it failed when every text fails", async () => {
     const db = fakeDb([{ id: "a1", message: "hi", audience: null, status: "scheduled", due: false }]);
-    const result = await sendAnnouncement("a1", {
+    const result = await sendAnnouncement(TEST_SCHOOL, "a1", {
       database: db.database,
       sendSms: recorder("failed").sendSms,
       now,
@@ -99,7 +107,7 @@ describe("sendDueAnnouncements", () => {
       { id: "cancelled", message: "hi", audience: null, status: "cancelled", due: true },
     ]);
     const sms = recorder("dry_run");
-    const result = await sendDueAnnouncements(now(), { database: db.database, sendSms: sms.sendSms });
+    const result = await sendDueAnnouncements(TEST_SCHOOL, now(), { database: db.database, sendSms: sms.sendSms, mode: "off" });
     assert.deepEqual(result, { sent: 1 });
     assert.deepEqual(db.finished.map((row) => row.id), ["due"]);
   });

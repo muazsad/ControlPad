@@ -1,4 +1,4 @@
-import { easternDateKey } from "@/lib/grades/sweep";
+import { schoolDateKey } from "@/lib/grades/sweep";
 
 // Pure staleness logic: has a course's grade data gone without an update for
 // too many of the student's own school days? No database access.
@@ -32,11 +32,11 @@ function utcMs(date: string): number {
   return new Date(`${date.slice(0, 10)}T00:00:00.000Z`).getTime();
 }
 
-/** A YYYY-MM-DD string is kept; anything with a time is converted to its Eastern date. */
-function toDateKey(value: string): string {
+/** A YYYY-MM-DD string is kept; anything with a time is converted to its school-local date. */
+function toDateKey(value: string, timeZone: string): string {
   return /^\d{4}-\d{2}-\d{2}$/.test(value)
     ? value
-    : easternDateKey(new Date(value));
+    : schoolDateKey(new Date(value), timeZone);
 }
 
 /** Expected school days in (from, to]: the day after `from` through `to`. */
@@ -71,12 +71,13 @@ export function courseStaleness(input: {
   today: string;
   thresholdSchoolDays: number;
   isExpectedDay: (date: string) => boolean;
+  timeZone: string;
 }): CourseStaleness {
   const since = input.latestRecordedAt ?? input.createdAt;
   if (!since) return { status: "fresh", schoolDaysSince: null };
 
   const schoolDaysSince = schoolDaysBetween(
-    toDateKey(since),
+    toDateKey(since, input.timeZone),
     input.today,
     input.isExpectedDay,
   );

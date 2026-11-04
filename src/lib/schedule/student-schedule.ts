@@ -11,7 +11,7 @@ import {
 // Resolves *when* a given student is expected on a given date, based on their
 // schedule group (or the school-wide defaults for students without a group).
 // Pure functions only — no database access. Times are "HH:MM" in the school's
-// local time zone (America/New_York).
+// local time zone (schools.time_zone).
 
 // ── Types ────────────────────────────────────────────────────────────────────
 

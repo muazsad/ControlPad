@@ -21,6 +21,7 @@ describe("gradeTrend", () => {
     const trend = gradeTrend(
       [snap("2026-09-20", 90), snap("2026-10-06", 88), snap("2026-10-12", 80), snap("2026-10-19", 75)],
       today,
+      "America/New_York",
     );
     assert.equal(TREND_WINDOW_DAYS, 14);
     assert.equal(trend?.baseline, 88);
@@ -31,27 +32,27 @@ describe("gradeTrend", () => {
   });
 
   it("falls back to the earliest in-window snapshot when there is none before it", () => {
-    const trend = gradeTrend([snap("2026-10-08", 85), snap("2026-10-15", 80)], today);
+    const trend = gradeTrend([snap("2026-10-08", 85), snap("2026-10-15", 80)], today, "America/New_York");
     assert.equal(trend?.baseline, 85);
     assert.equal(trend?.change, -5);
   });
 
   it("is null with a single snapshot inside the window", () => {
-    assert.equal(gradeTrend([snap("2026-10-15", 80)], today), null);
+    assert.equal(gradeTrend([snap("2026-10-15", 80)], today, "America/New_York"), null);
   });
 
   it("is null with no snapshots", () => {
-    assert.equal(gradeTrend([], today), null);
+    assert.equal(gradeTrend([], today, "America/New_York"), null);
   });
 
   it("reports a rising grade as a positive change", () => {
-    const trend = gradeTrend([snap("2026-10-01", 70), snap("2026-10-18", 82.5)], today);
+    const trend = gradeTrend([snap("2026-10-01", 70), snap("2026-10-18", 82.5)], today, "America/New_York");
     assert.equal(trend?.change, 12.5);
     assert.equal(trendTone(trend?.change ?? null), "success");
   });
 
   it("treats a lone old snapshot as its own baseline (no change)", () => {
-    const trend = gradeTrend([snap("2026-09-01", 77)], today);
+    const trend = gradeTrend([snap("2026-09-01", 77)], today, "America/New_York");
     assert.equal(trend?.change, 0);
     assert.deepEqual(trend?.points, [77]);
   });
@@ -60,6 +61,7 @@ describe("gradeTrend", () => {
     const trend = gradeTrend(
       [snap("2026-10-19", 75), snap("2026-10-25", 10), snap("2026-10-01", 90)],
       today,
+      "America/New_York",
     );
     assert.equal(trend?.baseline, 90);
     assert.equal(trend?.latest, 75);
@@ -67,7 +69,7 @@ describe("gradeTrend", () => {
 
   it("honors a custom window", () => {
     // 7-day window: cutoff Oct 13, so Oct 12 is the baseline.
-    const trend = gradeTrend([snap("2026-10-12", 90), snap("2026-10-19", 84)], today, 7);
+    const trend = gradeTrend([snap("2026-10-12", 90), snap("2026-10-19", 84)], today, "America/New_York", 7);
     assert.equal(trend?.baseline, 90);
     assert.equal(trend?.change, -6);
   });
@@ -85,8 +87,8 @@ describe("trendTone", () => {
 
 describe("studentTrend", () => {
   it("returns the worst course and the average across courses with a trend", () => {
-    const a = gradeTrend([snap("2026-10-01", 90), snap("2026-10-18", 80)], today)!;
-    const b = gradeTrend([snap("2026-10-01", 70), snap("2026-10-18", 72)], today)!;
+    const a = gradeTrend([snap("2026-10-01", 90), snap("2026-10-18", 80)], today, "America/New_York")!;
+    const b = gradeTrend([snap("2026-10-01", 70), snap("2026-10-18", 72)], today, "America/New_York")!;
     const result = studentTrend([
       { courseName: "Algebra", trend: a },
       { courseName: "Biology", trend: b },

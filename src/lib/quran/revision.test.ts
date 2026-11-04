@@ -131,8 +131,8 @@ describe("revision SMS", () => {
 
   it("builds the parent/admin text", () => {
     assert.equal(
-      revisionOverdueMessage("Yusuf Ali", [3, 7, 12, 20]),
-      "Salaam Institute: Yusuf hasn't revised Juz 3, 7 and 2 more in over a month. Please encourage review at home.",
+      revisionOverdueMessage("Yusuf Ali", [3, 7, 12, 20], "Test School"),
+      "Test School: Yusuf hasn't revised Juz 3, 7 and 2 more in over a month. Please encourage review at home.",
     );
   });
 });

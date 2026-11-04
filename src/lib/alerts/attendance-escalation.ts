@@ -19,6 +19,8 @@ import {
   type DefaultSchedule,
   type ScheduleGroup,
 } from "@/lib/schedule/student-schedule";
+import type { SchoolContext } from "@/lib/schools/school-context";
+import { localClock } from "@/lib/schools/clock";
 
 // Two-stage absence escalation, driven by each student's schedule group:
 //
@@ -33,7 +35,6 @@ import {
 
 // ── Tunable constants ────────────────────────────────────────────────────────
 
-const SCHOOL_TIME_ZONE = "America/New_York";
 
 /** Max student names listed in one admin text before "and N more". */
 const ADMIN_MESSAGE_MAX_NAMES = 6;
@@ -112,27 +113,13 @@ export type EscalationSettings = DefaultSchedule & {
 
 // ── Time zone helpers ────────────────────────────────────────────────────────
 
-export function schoolClock(now: Date): { date: string; minutes: number } {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: SCHOOL_TIME_ZONE,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    hourCycle: "h23",
-  }).formatToParts(now);
-  const value = (type: string) =>
-    parts.find((part) => part.type === type)?.value ?? "00";
-  return {
-    date: `${value("year")}-${value("month")}-${value("day")}`,
-    minutes: Number(value("hour")) * 60 + Number(value("minute")),
-  };
+export function schoolClock(now: Date, timeZone: string): { date: string; minutes: number } {
+  return localClock(now, timeZone);
 }
 
 /** Minutes into `date` (school time) that `now` represents, clamped for other days. */
-export function minutesIntoDate(date: string, now: Date): number {
-  const clock = schoolClock(now);
+export function minutesIntoDate(date: string, now: Date, timeZone: string): number {
+  const clock = schoolClock(now, timeZone);
   if (clock.date > date) return 24 * 60;
   if (clock.date < date) return -1;
   return clock.minutes;
@@ -246,16 +233,17 @@ export function adminReviewMessage(batch: AdminBatch, date: string): string {
   );
 }
 
-export function parentAbsenceMessage(alert: ParentAlert, date: string): string {
+export function parentAbsenceMessage(alert: ParentAlert, date: string, smsName: string): string {
   return alert.state === "absent"
-    ? `Salaam Institute: ${alert.name} was marked absent today (${friendlyDate(date)}). Please contact the school if you have questions.`
-    : `Salaam Institute: ${alert.name} has not been checked in today (${friendlyDate(date)}). If this is unexpected, please contact the school.`;
+    ? `${smsName}: ${alert.name} was marked absent today (${friendlyDate(date)}). Please contact the school if you have questions.`
+    : `${smsName}: ${alert.name} has not been checked in today (${friendlyDate(date)}). If this is unexpected, please contact the school.`;
 }
 
 export function escalationMessages(
   plan: EscalationPlan,
   date: string,
   admins: { phone: string | null }[],
+  ctx: SchoolContext,
 ): SendSmsInput[] {
   const messages: SendSmsInput[] = [];
 
@@ -264,6 +252,7 @@ export function escalationMessages(
     for (const admin of admins) {
       if (!admin.phone) continue;
       messages.push({
+        schoolId: ctx.schoolId,
         recipientPhone: admin.phone,
         recipientType: "admin",
         studentId: null,
@@ -276,9 +265,10 @@ export function escalationMessages(
   }
 
   for (const alert of plan.parentAlerts) {
-    const body = parentAbsenceMessage(alert, date);
+    const body = parentAbsenceMessage(alert, date, ctx.smsName);
     for (const guardian of alert.guardians) {
       messages.push({
+        schoolId: ctx.schoolId,
         recipientPhone: guardian.phone,
         recipientType: "parent",
         studentId: alert.id,
@@ -321,7 +311,7 @@ type StudentRow = {
     | null;
 };
 
-export function createSupabaseEscalationDatabase(): EscalationDatabase {
+export function createSupabaseEscalationDatabase(ctx: SchoolContext): EscalationDatabase {
   const supabase = createServiceClient();
 
   return {
@@ -329,7 +319,7 @@ export function createSupabaseEscalationDatabase(): EscalationDatabase {
       const { data, error } = await supabase
         .from("settings")
         .select("school_start, tardy_window_hours, parent_alert_delay_minutes, admin_digest_time")
-        .eq("id", 1)
+        .eq("school_id", ctx.schoolId)
         .single();
       if (error) throw new Error(error.message);
       return {
@@ -339,12 +329,13 @@ export function createSupabaseEscalationDatabase(): EscalationDatabase {
         adminDigestTime: String(data.admin_digest_time).slice(0, 5),
       };
     },
-    getSchoolCalendar: getServiceSchoolCalendar,
-    getScheduleGroups: getServiceScheduleGroups,
+    getSchoolCalendar: () => getServiceSchoolCalendar(ctx.schoolId),
+    getScheduleGroups: () => getServiceScheduleGroups(ctx.schoolId),
     async getAdminRecipients() {
       const { data, error } = await supabase
         .from("profiles")
         .select("phone")
+        .eq("school_id", ctx.schoolId)
         .eq("role", "admin")
         .not("phone", "is", null);
       if (error) throw new Error(error.message);
@@ -356,6 +347,7 @@ export function createSupabaseEscalationDatabase(): EscalationDatabase {
         .select(
           "id, first_name, last_name, schedule_group_id, attendance(status, date), student_guardians(guardians(full_name, phone))",
         )
+        .eq("school_id", ctx.schoolId)
         .eq("enrollment_status", "active")
         .eq("attendance.date", date);
       if (error) throw new Error(error.message);
@@ -365,6 +357,7 @@ export function createSupabaseEscalationDatabase(): EscalationDatabase {
       const { data: reportData, error: reportError } = await supabase
         .from("absence_reports")
         .select("student_id")
+        .eq("school_id", ctx.schoolId)
         .eq("date", date)
         .in("status", REPORTED_ABSENCE_STATUSES);
       const reported = new Set(
@@ -409,6 +402,7 @@ export type AttendanceTickResult = {
 };
 
 export async function runAttendanceTick(
+  ctx: SchoolContext,
   input: { now: Date; date?: string },
   deps: {
     database?: EscalationDatabase;
@@ -422,19 +416,19 @@ export async function runAttendanceTick(
     ) => Promise<{ sent: boolean; skippedReason?: string }>;
   } = {},
 ): Promise<AttendanceTickResult> {
-  const database = deps.database ?? createSupabaseEscalationDatabase();
+  const database = deps.database ?? createSupabaseEscalationDatabase(ctx);
   const send = deps.sendSms ?? sendSms;
   const checkTardies =
-    deps.checkTardies ?? ((date: string) => checkTardyThresholdAlerts({ date }));
+    deps.checkTardies ?? ((date: string) => checkTardyThresholdAlerts(ctx, { date }));
   // The daily Quran check covers inactivity (quran_slip) and memorized juz
   // that need revision (revision_overdue). A revision failure doesn't stop slip texts.
   const checkQuran =
     deps.checkQuran ??
     (async (date: string) => {
-      const slip = await checkQuranSlipAlerts(date);
+      const slip = await checkQuranSlipAlerts(ctx, date);
       let revisionMessages = 0;
       try {
-        revisionMessages = (await checkRevisionOverdueAlerts(date)).messages;
+        revisionMessages = (await checkRevisionOverdueAlerts(ctx, date)).messages;
       } catch (error) {
         console.error(
           "Revision overdue check failed",
@@ -445,12 +439,12 @@ export async function runAttendanceTick(
     });
   const sendNotice =
     deps.sendSpecialDayNotice ??
-    ((date: string, now: Date) => sendSpecialDayNotice({ date, now }));
+    ((date: string, now: Date) => sendSpecialDayNotice(ctx, { date, now }));
   const sendDigest =
-    deps.sendDigest ?? ((date: string, now: Date) => sendAdminDigest({ date, now }));
+    deps.sendDigest ?? ((date: string, now: Date) => sendAdminDigest(ctx, { date, now }));
 
-  const date = input.date ?? schoolClock(input.now).date;
-  const nowMinutes = minutesIntoDate(date, input.now);
+  const date = input.date ?? schoolClock(input.now, ctx.timeZone).date;
+  const nowMinutes = minutesIntoDate(date, input.now, ctx.timeZone);
 
   const [settings, calendar, groups, students, admins] = await Promise.all([
     database.getSettings(),
@@ -468,7 +462,7 @@ export async function runAttendanceTick(
     calendar,
     settings,
   });
-  const messages = escalationMessages(plan, date, admins);
+  const messages = escalationMessages(plan, date, admins, ctx);
   const results = await Promise.all(messages.map((message) => send(message)));
 
   const sent: Record<string, number> = {};

@@ -1,9 +1,11 @@
+import { localDate } from "@/lib/schools/clock";
+
 // Pure logic for the weekly grade sweep. No server or browser imports: the
 // client form and the server action both use these functions.
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
-/** A course counts as "updated" if its latest grade is within this many Eastern days (today included). */
+/** A course counts as "updated" if its latest grade is within this many school-local days (today included). */
 export const SWEEP_WINDOW_DAYS = 7;
 export const GRADE_MIN = 0;
 export const GRADE_MAX = 100;
@@ -13,7 +15,6 @@ export const MISSING_MIN = 0;
 export const MISSING_MAX = 999;
 /** Upper bound on entries one save will process (there is one per course). */
 export const MAX_SWEEP_ENTRIES = 2000;
-export const SCHOOL_TIME_ZONE = "America/New_York";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -277,18 +278,11 @@ export function invalidMessage(field: SweepField, reason: SweepInvalidReason): s
   }
 }
 
-// ── Eastern-time window ──────────────────────────────────────────────────────
+// ── School-local window ──────────────────────────────────────────────────────
 
-const easternFormatter = new Intl.DateTimeFormat("en-CA", {
-  timeZone: SCHOOL_TIME_ZONE,
-  year: "numeric",
-  month: "2-digit",
-  day: "2-digit",
-});
-
-/** Eastern calendar date as YYYY-MM-DD. */
-export function easternDateKey(date: Date): string {
-  return easternFormatter.format(date);
+/** The school-local calendar date of an instant, as YYYY-MM-DD. */
+export function schoolDateKey(date: Date, timeZone: string): string {
+  return localDate(date, timeZone);
 }
 
 function shiftDateKey(key: string, days: number): string {
@@ -296,14 +290,15 @@ function shiftDateKey(key: string, days: number): string {
   return new Date(Date.UTC(y, m - 1, d + days)).toISOString().slice(0, 10);
 }
 
-/** True when `recordedAt` falls on today or the previous SWEEP_WINDOW_DAYS - 1 Eastern days. */
+/** True when `recordedAt` falls on today or the previous SWEEP_WINDOW_DAYS - 1 school-local days. */
 export function isWithinSweepWindow(
   recordedAt: string | null,
   now: Date,
+  timeZone: string,
 ): boolean {
   if (!recordedAt) return false;
   const recorded = new Date(recordedAt);
   if (Number.isNaN(recorded.getTime())) return false;
-  const earliest = shiftDateKey(easternDateKey(now), -(SWEEP_WINDOW_DAYS - 1));
-  return easternDateKey(recorded) >= earliest;
+  const earliest = shiftDateKey(schoolDateKey(now, timeZone), -(SWEEP_WINDOW_DAYS - 1));
+  return schoolDateKey(recorded, timeZone) >= earliest;
 }

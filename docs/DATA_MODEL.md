@@ -6,6 +6,13 @@ Companion to `PROJECT_PLAN.md`. This describes the Postgres/Supabase schema, rel
 
 ## Design notes
 
+- **Multi-school (Nov 2026).** One database serves many schools. Every table holding a school's data has a
+  not-null `school_id` (default `current_school_id()`, the signed-in user's school), every RLS policy checks
+  `school_id = current_school_id()`, and children reference their parent by `(parent_id, school_id)` with
+  composite foreign keys so a row can never point at another school's student. One school per login
+  (`profiles.school_id`). Service-role code (crons, SMS, the Twilio webhook) has no signed-in user: it
+  must pass `school_id` explicitly and filter every query by it. Spec:
+  `docs/superpowers/specs/2026-11-03-multi-tenancy-design.md`.
 - **Parents may have no login.** Many parents only receive SMS. So contact data lives in a `guardians` table that does **not** require an auth account. A guardian who *wants* web access gets a Supabase auth user, and `guardians.user_id` links to it.
 - **Staff (admin, moderator) always have logins**, represented in `profiles` (1:1 with `auth.users`).
 - **History is kept** for grades, attendance, Quran progress, and notifications — we need trends and an audit trail, not just current values.
@@ -34,12 +41,45 @@ create type notification_status  as enum ('queued','sent','failed','dry_run'); -
 ## Tables
 
 ```sql
+-- One school per tenant (Nov 2026). The fixed id 00000000-0000-0000-0000-000000000001
+-- is the "Pre-multi-tenant archive": all pre-Nov-2026 rows, archived = true, invisible to everyone.
+create table schools (
+  id          uuid primary key default gen_random_uuid(),
+  name        text not null,                 -- 2–80 chars
+  sms_name    text not null,                 -- prefix on every text, 2–40 chars
+  time_zone   text not null default 'America/New_York',  -- IANA; local times + dates follow it
+  archived    boolean not null default false,
+  created_by  uuid references auth.users(id) on delete set null,
+  created_at  timestamptz not null default now(),
+  updated_at  timestamptz not null default now()
+);
+
+-- Each school's own Twilio (Nov 2026). RLS on, NO policies: service role only.
+create table school_sms_config (
+  school_id              uuid primary key references schools(id) on delete cascade,
+  twilio_account_sid     text,
+  twilio_auth_token_enc  text,               -- AES-256-GCM with SMS_CREDENTIALS_KEY; never sent to the browser
+  twilio_phone_number    text unique,        -- E.164; inbound texts are routed to the school by this
+  verified_at            timestamptz,        -- last successful check with Twilio
+  requested_mode         text not null default 'off',  -- 'off' | 'test' | 'live'
+  live_approved_at       timestamptz,        -- set by a platform admin; live needs it
+  live_approved_by       uuid references auth.users(id) on delete set null,
+  test_number            text,
+  updated_at             timestamptz not null default now()
+);
+
+-- Who can see /platform and approve live texting. Service role only.
+create table platform_admins (
+  user_id uuid primary key references auth.users(id) on delete cascade
+);
+
 -- One row per authenticated user (admin / moderator / parent-with-login)
 create table profiles (
   id          uuid primary key references auth.users(id) on delete cascade,
-  role        user_role not null,
+  role        user_role not null,           -- role in school_id
   full_name   text not null,
   phone       text,                       -- for admin/moderator alerts
+  school_id   uuid references schools(id) on delete cascade,  -- null until onboarding creates a school
   created_at  timestamptz not null default now()
 );
 
@@ -155,9 +195,10 @@ create table payments (
   unique (student_id, period_month)
 );
 
--- Single-row table of configurable thresholds (id is always 1)
+-- One row of configurable thresholds per school (Nov 2026: keyed by school_id;
+-- the old id column is kept but unused)
 create table settings (
-  id                    int primary key default 1 check (id = 1),
+  school_id             uuid primary key references schools(id) on delete cascade,
   grade_floor           numeric not null default 70,
   tardy_window_hours    numeric not null default 2,
   tardies_per_week      int     not null default 3,
@@ -167,12 +208,12 @@ create table settings (
   admin_digest_time     time    not null default '15:00',
   updated_at            timestamptz not null default now()
 );
-insert into settings (id) values (1) on conflict do nothing;
+-- create_school() inserts each school's row.
 
--- Single-row editable weekly calendar pattern.
+-- One editable weekly calendar pattern per school.
 -- Default: Mon/Tue/Wed/Thu/Sat on; Fri/Sun off.
 create table school_weekly_patterns (
-  id          int primary key default 1 check (id = 1),
+  school_id   uuid primary key references schools(id) on delete cascade,
   sunday      boolean not null default false,
   monday      boolean not null default true,
   tuesday     boolean not null default true,
@@ -182,7 +223,6 @@ create table school_weekly_patterns (
   saturday    boolean not null default true,
   updated_at  timestamptz not null default now()
 );
-insert into school_weekly_patterns (id) values (1) on conflict do nothing;
 
 -- No-school ranges such as winter break.
 create table school_breaks (
@@ -197,7 +237,7 @@ create table school_breaks (
 
 -- Date-specific overrides. A special week is represented by one row per date.
 create table school_special_days (
-  date        date primary key,
+  date        date not null,              -- primary key (school_id, date)
   type        text not null check (type in ('no_school', 'half_day', 'schedule_change',
                                             'no_gcvs', 'field_trip', 'other')),
   start_time  time,                        -- required for half_day / schedule_change
@@ -234,7 +274,7 @@ create table notifications (
 -- which weekdays they attend and their times. Null group = school-wide settings.
 create table schedule_groups (
   id           uuid primary key default gen_random_uuid(),
-  name         text not null unique,      -- e.g. 'Full time', 'Quran only'
+  name         text not null,             -- unique per school; e.g. 'Full time', 'Quran only'
   description  text,
   created_at   timestamptz not null default now(),
   updated_at   timestamptz not null default now()
@@ -320,22 +360,38 @@ create table absence_reports (
 
 -- Hifz revision (20261016000000_quran_lesson_types.sql, Oct 16 2026):
 --   settings.revision_overdue_school_days integer not null default 21 (1–180)
+
+-- Multi-school (20261103000000–20261103000300, Nov 3 2026):
+--   school_id uuid not null default current_school_id() references schools on: students, guardians,
+--     student_guardians, courses, grades, attendance, quran_progress, student_memorized_juz, juz_tests,
+--     payments, notifications, settings, school_weekly_patterns, school_breaks, school_special_days,
+--     schedule_groups, schedule_group_days, inbound_messages, absence_reports, announcements
+--   unique (id, school_id) on students, guardians, courses, schedule_groups, inbound_messages, and
+--     composite FKs (parent_id, school_id) from every child (on delete set null (col) where it was set null)
+--   schedule_groups unique (school_id, name); school_special_days primary key (school_id, date);
+--     settings / school_weekly_patterns primary key school_id
+--   Every pre-existing row and profile was moved into the archive school.
 ```
 
 ---
 
 ## Row Level Security
 
-Enable RLS on every table, then add policies. A helper avoids repeating the role lookup:
+Enable RLS on every table, then add policies. Helpers (all `SECURITY DEFINER`):
 
 ```sql
--- Returns the current user's role; SECURITY DEFINER so it can read profiles
-create or replace function public.user_role()
-returns user_role
-language sql stable security definer
-set search_path = public
-as $$ select role from public.profiles where id = auth.uid() $$;
+-- The signed-in user's school, or null (no school yet, or the archive school).
+public.current_school_id() returns uuid
+-- The user's role in that school (null without one).
+public.user_role() returns user_role
+-- Onboarding: creates a school, its settings / weekly pattern / sms config rows, and makes the
+-- caller its admin. Refuses if the caller already has a school.
+public.create_school(p_name, p_sms_name, p_time_zone, p_full_name, p_phone) returns uuid
 ```
+
+**Every policy on a school's table checks `school_id = public.current_school_id()`** in `using` and
+`with check`, on top of the role rules below. `tests/tenant-rls.test.mjs` fails the build if one doesn't;
+`supabase/tests/tenant_isolation.test.sql` (pgTAP) checks it against a real database.
 
 **Access rules to implement (per table):**
 
@@ -351,6 +407,12 @@ as $$ select role from public.profiles where id = auth.uid() $$;
 | inbound_messages | read (writes: server only) | none | none |
 | absence_reports | full | read | none |
 | announcements | full | none | none |
+| schools | read own; update `name`, `sms_name`, `time_zone` only (column grants) | read own | read own |
+| profiles | full, own school | read own school's staff | read own row |
+| school_sms_config, platform_admins | none (service role only) | none | none |
+
+Nobody can insert their own profile (the old `profiles_own_insert` policy is gone): profiles come
+from `create_school()` or an admin creating a staff/parent login.
 
 **Parent "own children" check** (reusable predicate):
 
@@ -368,23 +430,18 @@ public.parent_has_student(<table>.student_id)
 alter table students enable row level security;
 
 create policy students_admin_all on students
-  for all using (public.user_role() = 'admin') with check (public.user_role() = 'admin');
+  for all using (school_id = public.current_school_id() and public.user_role() = 'admin')
+  with check (school_id = public.current_school_id() and public.user_role() = 'admin');
 
 create policy students_moderator_rw on students
-  for all using (public.user_role() = 'moderator') with check (public.user_role() = 'moderator');
+  for all using (school_id = public.current_school_id() and public.user_role() = 'moderator')
+  with check (school_id = public.current_school_id() and public.user_role() = 'moderator');
 
 create policy students_parent_read on students
-  for select using (
-    public.user_role() = 'parent'
-    and exists (
-      select 1 from student_guardians sg
-      join guardians g on g.id = sg.guardian_id
-      where sg.student_id = students.id and g.user_id = auth.uid()
-    )
-  );
+  for select using (school_id = public.current_school_id() and public.parent_has_student(students.id));
 ```
 
-> The **service role key** bypasses RLS. It is used **only** in server-side code (cron jobs, the SMS engine) and **never** shipped to the browser.
+> The **service role key** bypasses RLS. It is used **only** in server-side code (cron jobs, the SMS engine, the Twilio webhook, `/platform`) and **never** shipped to the browser. Every service-role query on a school's table must filter by `school_id`; `tests/service-role-school-scope.test.mjs` checks this (mark a deliberate cross-school lookup with `// tenant-scope-ok: <reason>`).
 
 ---
 
@@ -403,7 +460,7 @@ create policy students_parent_read on students
   or above it, danger at or above 2× (`PACE_DANGER_MULTIPLIER`). Missing assignments use the same bands
   against `missing_assignments_threshold`.
 - **Stale course** = latest `grades.recorded_at` is more than `settings.stale_grade_school_days` of the
-  student's own expected school days old (Eastern dates; breaks/no-school days don't count). **Never
+  student's own expected school days old (school-local dates; breaks/no-school days don't count). **Never
   graded** = no grades row and `courses.created_at` older than the same threshold. Staff-only; no SMS.
 - **Grade trend** = latest grade − baseline over `TREND_WINDOW_DAYS` (14 calendar days): baseline is the
   latest snapshot on or before today − 14, else the earliest in-window snapshot when there are at least 2.

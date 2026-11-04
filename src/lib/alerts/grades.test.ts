@@ -3,6 +3,14 @@ import { describe, it } from "node:test";
 
 import { checkLowGradeAlert, type GradeAlertDatabase } from "./grades";
 import type { SendSmsInput } from "@/lib/sms/send-sms";
+import type { SchoolContext } from "@/lib/schools/school-context";
+
+const TEST_SCHOOL: SchoolContext = {
+  schoolId: "school-1",
+  name: "Test School",
+  smsName: "Test School",
+  timeZone: "America/New_York",
+};
 
 class FakeGradeAlertDatabase implements GradeAlertDatabase {
   gradeFloor: number;
@@ -36,7 +44,7 @@ describe("checkLowGradeAlert", () => {
   it("does not send alerts when the grade is at or above the settings floor", async () => {
     const sent: SendSmsInput[] = [];
 
-    const result = await checkLowGradeAlert(
+    const result = await checkLowGradeAlert(TEST_SCHOOL, 
       {
         studentId: "student-1",
         studentName: "Amina Noor",
@@ -64,7 +72,7 @@ describe("checkLowGradeAlert", () => {
   it("sends a low-grade alert to admin phones when grade is below settings floor", async () => {
     const sent: SendSmsInput[] = [];
 
-    const result = await checkLowGradeAlert(
+    const result = await checkLowGradeAlert(TEST_SCHOOL, 
       {
         studentId: "student-1",
         studentName: "Amina Noor",

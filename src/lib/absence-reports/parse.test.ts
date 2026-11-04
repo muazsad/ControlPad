@@ -144,15 +144,15 @@ describe("planInboundSms", () => {
 describe("messages", () => {
   it("acknowledges today and tomorrow", () => {
     assert.match(
-      acknowledgementMessage([amina], "2026-10-12", "2026-10-12"),
+      acknowledgementMessage([amina], "2026-10-12", "2026-10-12", "Test School"),
       /Amina will be absent today \(Mon, Oct 12\)/,
     );
     assert.match(
-      acknowledgementMessage([amina, yusuf], "2026-10-13", "2026-10-12"),
+      acknowledgementMessage([amina, yusuf], "2026-10-13", "2026-10-12", "Test School"),
       /Amina and Yusuf will be absent tomorrow/,
     );
   });
 
   it("lists the children when asking which one", () =>
-    assert.match(askWhichChildMessage([amina, yusuf]), /\(Amina, Yusuf\) or ALL/));
+    assert.match(askWhichChildMessage([amina, yusuf], "Test School"), /\(Amina, Yusuf\) or ALL/));
 });

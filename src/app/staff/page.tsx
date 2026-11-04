@@ -31,13 +31,18 @@ export default async function StaffPage() {
   const { data } = await supabase
     .from("profiles")
     .select("id, full_name, role, phone, created_at")
+    .eq("school_id", profile.schoolId)
     .in("role", ["admin", "moderator"])
     .order("role", { ascending: true });
 
   const staff = (data ?? []) as StaffProfile[];
 
   return (
-    <AppShell fullName={profile.fullName} role={profile.role}>
+    <AppShell
+      fullName={profile.fullName}
+      role={profile.role}
+      schoolName={profile.schoolName}
+    >
       <div className="mx-auto max-w-5xl space-y-6">
         <PageHeader
           title="Staff"

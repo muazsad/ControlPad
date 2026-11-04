@@ -9,8 +9,8 @@ import {
   type DefaultSchedule,
   type ScheduleGroup,
 } from "@/lib/schedule/student-schedule";
+import type { SchoolContext } from "@/lib/schools/school-context";
 
-const SCHOOL_TIME_ZONE = "America/New_York";
 
 /** Tardies are counted over each student's last N expected school days. */
 export const TARDY_WINDOW_SCHOOL_DAYS = 7;
@@ -118,29 +118,6 @@ function studentName(student: Pick<AttendanceAlertStudent, "first_name" | "last_
   return `${student.first_name} ${student.last_name}`.trim();
 }
 
-function schoolDateParts(now: Date) {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: SCHOOL_TIME_ZONE,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  }).formatToParts(now);
-  const value = (type: string) =>
-    parts.find((part) => part.type === type)?.value ?? "00";
-
-  return {
-    date: `${value("year")}-${value("month")}-${value("day")}`,
-    minutes: Number(value("hour")) * 60 + Number(value("minute")),
-  };
-}
-
-export function todayInSchoolTimeZone(now = new Date()) {
-  return schoolDateParts(now).date;
-}
-
 function addDays(date: string, days: number): string {
   const cursor = new Date(`${date.slice(0, 10)}T00:00:00.000Z`);
   cursor.setUTCDate(cursor.getUTCDate() + days);
@@ -198,13 +175,14 @@ export function studentsAtTardyThreshold(input: {
   return result;
 }
 
-async function guardianMapForStudents(studentIds: string[]) {
+async function guardianMapForStudents(ctx: SchoolContext, studentIds: string[]) {
   if (studentIds.length === 0) return new Map<string, GuardianRecipient[]>();
 
   const supabase = createServiceClient();
   const { data, error } = await supabase
     .from("student_guardians")
     .select("student_id, guardians(full_name, phone)")
+    .eq("school_id", ctx.schoolId)
     .in("student_id", studentIds);
 
   if (error) throw new Error(error.message);
@@ -220,7 +198,7 @@ async function guardianMapForStudents(studentIds: string[]) {
   return map;
 }
 
-export function createSupabaseAttendanceAlertDatabase(): AttendanceAlertDatabase {
+export function createSupabaseAttendanceAlertDatabase(ctx: SchoolContext): AttendanceAlertDatabase {
   const supabase = createServiceClient();
 
   return {
@@ -228,7 +206,7 @@ export function createSupabaseAttendanceAlertDatabase(): AttendanceAlertDatabase
       const { data, error } = await supabase
         .from("settings")
         .select("school_start, tardy_window_hours, tardies_per_week")
-        .eq("id", 1)
+        .eq("school_id", ctx.schoolId)
         .single();
 
       if (error) throw new Error(error.message);
@@ -239,25 +217,27 @@ export function createSupabaseAttendanceAlertDatabase(): AttendanceAlertDatabase
       };
     },
     async getSchoolCalendar() {
-      return getServiceSchoolCalendar();
+      return getServiceSchoolCalendar(ctx.schoolId);
     },
     async getAdminRecipients() {
       const { data, error } = await supabase
         .from("profiles")
         .select("full_name, phone")
+        .eq("school_id", ctx.schoolId)
         .eq("role", "admin")
         .not("phone", "is", null);
 
       if (error) throw new Error(error.message);
       return (data ?? []) as Recipient[];
     },
-    getScheduleGroups: getServiceScheduleGroups,
+    getScheduleGroups: () => getServiceScheduleGroups(ctx.schoolId),
     async getTardyCandidates({ startDate, endDate }) {
       const { data, error } = await supabase
         .from("attendance")
         .select(
           "student_id, date, students(id, first_name, last_name, schedule_group_id, enrollment_status)",
         )
+        .eq("school_id", ctx.schoolId)
         .eq("status", "tardy")
         .gte("date", startDate)
         .lte("date", endDate);
@@ -273,7 +253,7 @@ export function createSupabaseAttendanceAlertDatabase(): AttendanceAlertDatabase
         byStudent.set(row.student_id, entry);
       }
 
-      const guardianMap = await guardianMapForStudents(Array.from(byStudent.keys()));
+      const guardianMap = await guardianMapForStudents(ctx, Array.from(byStudent.keys()));
 
       return Array.from(byStudent.entries()).map(([studentId, { student, dates }]) => ({
         id: student.id,
@@ -288,10 +268,11 @@ export function createSupabaseAttendanceAlertDatabase(): AttendanceAlertDatabase
 }
 
 export async function checkTardyThresholdAlerts(
+  ctx: SchoolContext,
   input: TardyAlertInput,
   deps: AlertDeps = {},
 ): Promise<AlertResult> {
-  const database = deps.database ?? createSupabaseAttendanceAlertDatabase();
+  const database = deps.database ?? createSupabaseAttendanceAlertDatabase(ctx);
   const send = deps.sendSms ?? sendSms;
   const [settings, calendar, groups, candidates] = await Promise.all([
     database.getAttendanceSettings(),
@@ -317,9 +298,10 @@ export async function checkTardyThresholdAlerts(
   const messages: SendSmsInput[] = [];
 
   for (const student of students) {
-    const body = `${studentName(student)} has ${student.tardyCount} tardies in their last ${TARDY_WINDOW_SCHOOL_DAYS} school days, meeting the ControlPad threshold of ${settings.tardiesPerWeek}. Please contact Salaam Institute if you have questions.`;
+    const body = `${studentName(student)} has ${student.tardyCount} tardies in their last ${TARDY_WINDOW_SCHOOL_DAYS} school days, meeting the ControlPad threshold of ${settings.tardiesPerWeek}. Please contact ${ctx.smsName} if you have questions.`;
     for (const guardian of student.guardians) {
       messages.push({
+        schoolId: ctx.schoolId,
         recipientPhone: guardian.phone,
         recipientType: "parent",
         studentId: student.id,
