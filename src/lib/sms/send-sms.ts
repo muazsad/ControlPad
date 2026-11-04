@@ -1,4 +1,5 @@
 import { createServiceClient } from "@/lib/supabase/server";
+import { loadSchoolSmsConfig } from "@/lib/sms/school-sms-config";
 
 export type NotificationTrigger =
   | "low_grade"
@@ -160,7 +161,8 @@ export type SmsDatabase = {
 
 type SendSmsDeps = {
   database?: SmsDatabase;
-  env?: NodeJS.ProcessEnv | Record<string, string | undefined>;
+  /** The school's effective texting setup (default: its saved Twilio config). */
+  getConfig?: (schoolId: string) => Promise<SmsConfig>;
   fetch?: typeof fetch;
   now?: () => Date;
 };
@@ -175,57 +177,6 @@ function getNotificationId(notification: unknown): string | null {
     return notification.id;
   }
   return null;
-}
-
-function requiredTwilioEnv(env: NodeJS.ProcessEnv | Record<string, string | undefined>) {
-  const accountSid = env.TWILIO_ACCOUNT_SID;
-  const authToken = env.TWILIO_AUTH_TOKEN;
-  const fromPhone = env.TWILIO_PHONE_NUMBER;
-
-  if (!accountSid || !authToken || !fromPhone) return null;
-
-  return { accountSid, authToken, fromPhone };
-}
-
-/** Reads SMS_MODE / Twilio / SMS_TEST_NUMBER env vars. Never returns secrets to the client. */
-export function getSmsConfig(
-  env: NodeJS.ProcessEnv | Record<string, string | undefined> = process.env,
-): SmsConfig {
-  const twilio = requiredTwilioEnv(env);
-  const testNumber = env.SMS_TEST_NUMBER?.trim() || null;
-  const requested = env.SMS_MODE?.trim().toLowerCase();
-
-  if (requested === "off") {
-    return { mode: "off", reason: "SMS_MODE is off.", twilio, testNumber };
-  }
-  if (!twilio) {
-    return {
-      mode: "off",
-      reason: "Twilio is not configured yet (TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_PHONE_NUMBER).",
-      twilio: null,
-      testNumber,
-    };
-  }
-  if (requested === "test") {
-    if (!testNumber) {
-      return {
-        mode: "off",
-        reason: "SMS_MODE is test but SMS_TEST_NUMBER is not set.",
-        twilio,
-        testNumber: null,
-      };
-    }
-    return { mode: "test", reason: "SMS_MODE is test.", twilio, testNumber };
-  }
-  if (requested && requested !== "live") {
-    return {
-      mode: "off",
-      reason: `Unknown SMS_MODE "${requested}" (use off, test, or live).`,
-      twilio,
-      testNumber,
-    };
-  }
-  return { mode: "live", reason: "Twilio is configured.", twilio, testNumber };
 }
 
 /** "+14135550101" → "•••0101" — avoid showing full numbers in logs/UI. */
@@ -298,12 +249,11 @@ export async function sendSms(
   deps: SendSmsDeps = {},
 ): Promise<SmsResult> {
   const database = deps.database ?? createSupabaseSmsDatabase();
-  const env = deps.env ?? process.env;
   const now = deps.now ?? (() => new Date());
   const fetchImpl = deps.fetch ?? fetch;
   const dedupeWindowHours = input.dedupeWindowHours ?? 24 * 7;
   const since = new Date(now().getTime() - dedupeWindowHours * 60 * 60 * 1000);
-  const config = getSmsConfig(env);
+  const config = await (deps.getConfig ?? loadSchoolSmsConfig)(input.schoolId);
 
   const recent = await database.findRecentNotifications({
     schoolId: input.schoolId,

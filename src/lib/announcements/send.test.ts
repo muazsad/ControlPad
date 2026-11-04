@@ -107,7 +107,7 @@ describe("sendDueAnnouncements", () => {
       { id: "cancelled", message: "hi", audience: null, status: "cancelled", due: true },
     ]);
     const sms = recorder("dry_run");
-    const result = await sendDueAnnouncements(TEST_SCHOOL, now(), { database: db.database, sendSms: sms.sendSms });
+    const result = await sendDueAnnouncements(TEST_SCHOOL, now(), { database: db.database, sendSms: sms.sendSms, mode: "off" });
     assert.deepEqual(result, { sent: 1 });
     assert.deepEqual(db.finished.map((row) => row.id), ["due"]);
   });

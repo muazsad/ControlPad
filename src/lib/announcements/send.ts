@@ -2,7 +2,8 @@
 // goes through sendSms — SMS_MODE, logging and dedupe apply.
 // Spec: docs/superpowers/specs/2026-10-11-announcements-design.md
 
-import { getSmsConfig, sendSms, type SendSmsInput, type SmsResult } from "@/lib/sms/send-sms";
+import { loadSchoolSmsConfig } from "@/lib/sms/school-sms-config";
+import { sendSms, type SendSmsInput, type SmsResult } from "@/lib/sms/send-sms";
 import { createServiceClient } from "@/lib/supabase/server";
 
 import {
@@ -59,7 +60,7 @@ export async function sendAnnouncement(
   const database = deps.database ?? createSupabaseAnnouncementDatabase(ctx);
   const send = deps.sendSms ?? sendSms;
   const now = deps.now ?? (() => new Date());
-  const mode = deps.mode ?? getSmsConfig().mode;
+  const mode = deps.mode ?? (await loadSchoolSmsConfig(ctx.schoolId)).mode;
 
   const announcement = await database.claim(id);
   if (!announcement) return { status: "not_claimed" };
@@ -116,13 +117,17 @@ export async function sendAnnouncement(
 export async function sendDueAnnouncements(
   ctx: SchoolContext,
   now: Date,
-  deps: { database?: AnnouncementDatabase; sendSms?: (input: SendSmsInput) => Promise<SmsResult> } = {},
+  deps: {
+    database?: AnnouncementDatabase;
+    sendSms?: (input: SendSmsInput) => Promise<SmsResult>;
+    mode?: string;
+  } = {},
 ): Promise<{ sent: number }> {
   const database = deps.database ?? createSupabaseAnnouncementDatabase(ctx);
   const due = await database.findDue(now);
   let sent = 0;
   for (const id of due) {
-    const result = await sendAnnouncement(ctx, id, { database, sendSms: deps.sendSms });
+    const result = await sendAnnouncement(ctx, id, { database, sendSms: deps.sendSms, mode: deps.mode });
     if (result.status === "sent") sent += 1;
   }
   return { sent };
