@@ -192,7 +192,7 @@ New tables:
 | Table | Admin | Moderator | Parent | Other |
 |---|---|---|---|---|
 | `schools` | read own; update `name`, `sms_name`, `time_zone` | read own | read own | platform admins go through service-role server code, not RLS |
-| `profiles` | read/write profiles in own school (staff + parent logins) | read own school's staff | read own row | user may update own `full_name`/`phone` only |
+| `profiles` | read/write profiles in own school (staff + parent logins) | read own school's staff | read own row | every user reads their own row; nobody inserts their own profile (only `create_school()` / an admin) |
 | `school_sms_config` | none (server actions only, §7.3) | none | none | service role |
 | `platform_admins` | none | none | none | service role |
 
