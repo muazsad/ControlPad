@@ -147,6 +147,7 @@ export async function checkRevisionOverdueAlerts(
     const body = revisionOverdueMessage(
       student.name,
       overdue.map((status) => status.juz),
+      ctx.smsName,
     );
     const recipients = [
       ...student.guardians.map((r) => ({ phone: r.phone, type: "parent" as const })),

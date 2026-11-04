@@ -13,3 +13,11 @@ export type SchoolRow = { id: string; name: string; sms_name: string; time_zone:
 export function contextFromRow(row: SchoolRow): SchoolContext {
   return { schoolId: row.id, name: row.name, smsName: row.sms_name, timeZone: row.time_zone };
 }
+
+/** "Noor Academy: <message>", unless the message already starts with the name. */
+export function withSchoolPrefix(message: string, smsName: string): string {
+  const trimmed = message.trim();
+  return trimmed.toLowerCase().startsWith(smsName.toLowerCase())
+    ? trimmed
+    : `${smsName}: ${trimmed}`;
+}

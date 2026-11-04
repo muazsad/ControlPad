@@ -19,7 +19,7 @@ import {
   SPECIAL_DAY_DEDUPE_HOURS,
   SPECIAL_DAY_NOTICE_TIME,
 } from "@/lib/alerts/special-day-constants";
-import type { SchoolContext } from "@/lib/schools/school-context";
+import { withSchoolPrefix, type SchoolContext } from "@/lib/schools/school-context";
 
 export {
   SPECIAL_DAY_DEDUPE_HOURS,
@@ -27,16 +27,13 @@ export {
   SPECIAL_DAY_NOTICE_TIME,
 } from "@/lib/alerts/special-day-constants";
 
-const MESSAGE_PREFIX = "Salaam Institute: ";
-
 export type SpecialDayStudent = {
   groupId: string | null;
   guardians: { phone: string | null }[];
 };
 
-export function specialDayNoticeBody(message: string): string {
-  const trimmed = message.trim();
-  return /^salaam institute/i.test(trimmed) ? trimmed : `${MESSAGE_PREFIX}${trimmed}`;
+export function specialDayNoticeBody(message: string, smsName: string): string {
+  return withSchoolPrefix(message, smsName);
 }
 
 /** Unique guardian phones for students the special day applies to. */
@@ -176,7 +173,7 @@ export async function sendSpecialDayNotice(
     return { sent: false, reason: "No parent phone numbers for the students this day applies to.", recipients: 0, statuses: {} };
   }
 
-  const body = specialDayNoticeBody(message);
+  const body = specialDayNoticeBody(message, ctx.smsName);
   const dedupeKey = specialDayDedupeKey(day.date, message);
   const results = await Promise.all(
     phones.map((phone) =>

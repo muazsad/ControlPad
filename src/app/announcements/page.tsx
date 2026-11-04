@@ -170,6 +170,7 @@ export default async function AnnouncementsPage() {
                 students={counting}
                 defaultDate={addDays(today, 1)}
                 minDate={today}
+                smsName={profile.smsName}
               />
             )}
           </CardContent>

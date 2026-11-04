@@ -63,7 +63,7 @@ describe("sendAnnouncement", () => {
 
     assert.deepEqual(result, { status: "sent", recipients: 2, failed: 0, mode: "live" });
     assert.deepEqual(sms.sent.map((m) => m.recipientPhone), ["+14135550101", "+14135550202"]);
-    assert.equal(sms.sent[0].body, "Salaam Institute: No school Friday");
+    assert.equal(sms.sent[0].body, "Test School: No school Friday");
     assert.equal(sms.sent[0].triggerType, "announcement");
     assert.equal(sms.sent[0].dedupeKey, "announcement:a1");
     assert.equal(db.finished[0].status, "sent");

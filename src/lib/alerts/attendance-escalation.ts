@@ -233,16 +233,17 @@ export function adminReviewMessage(batch: AdminBatch, date: string): string {
   );
 }
 
-export function parentAbsenceMessage(alert: ParentAlert, date: string): string {
+export function parentAbsenceMessage(alert: ParentAlert, date: string, smsName: string): string {
   return alert.state === "absent"
-    ? `Salaam Institute: ${alert.name} was marked absent today (${friendlyDate(date)}). Please contact the school if you have questions.`
-    : `Salaam Institute: ${alert.name} has not been checked in today (${friendlyDate(date)}). If this is unexpected, please contact the school.`;
+    ? `${smsName}: ${alert.name} was marked absent today (${friendlyDate(date)}). Please contact the school if you have questions.`
+    : `${smsName}: ${alert.name} has not been checked in today (${friendlyDate(date)}). If this is unexpected, please contact the school.`;
 }
 
 export function escalationMessages(
   plan: EscalationPlan,
   date: string,
   admins: { phone: string | null }[],
+  smsName: string,
 ): SendSmsInput[] {
   const messages: SendSmsInput[] = [];
 
@@ -263,7 +264,7 @@ export function escalationMessages(
   }
 
   for (const alert of plan.parentAlerts) {
-    const body = parentAbsenceMessage(alert, date);
+    const body = parentAbsenceMessage(alert, date, smsName);
     for (const guardian of alert.guardians) {
       messages.push({
         recipientPhone: guardian.phone,
@@ -459,7 +460,7 @@ export async function runAttendanceTick(
     calendar,
     settings,
   });
-  const messages = escalationMessages(plan, date, admins);
+  const messages = escalationMessages(plan, date, admins, ctx.smsName);
   const results = await Promise.all(messages.map((message) => send(message)));
 
   const sent: Record<string, number> = {};

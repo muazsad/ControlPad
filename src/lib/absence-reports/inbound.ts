@@ -147,7 +147,7 @@ export async function handleInboundSms(
       recipientType: "parent",
       studentId: plan.children.length === 1 ? plan.children[0].id : null,
       triggerType: "absence_report_reply",
-      body: acknowledgementMessage(plan.children, plan.date, clock.date),
+      body: acknowledgementMessage(plan.children, plan.date, clock.date, ctx.smsName),
       dedupeKey: `inbound:${inbound.id}`,
       dedupeWindowHours: REPLY_DEDUPE_HOURS,
     });
@@ -165,7 +165,7 @@ export async function handleInboundSms(
       recipientType: "parent",
       studentId: null,
       triggerType: "absence_report_reply",
-      body: askWhichChildMessage(plan.children),
+      body: askWhichChildMessage(plan.children, ctx.smsName),
       dedupeKey: `inbound:${inbound.id}`,
       dedupeWindowHours: REPLY_DEDUPE_HOURS,
     });

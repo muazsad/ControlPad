@@ -90,9 +90,10 @@ export function paceBehindMessage(input: {
   courseName: string;
   actual: number;
   expected: number;
+  smsName: string;
 }): string {
   const name = firstName(input.studentName);
-  return `Salaam Institute: ${name} is behind in ${input.courseName} (${Math.round(
+  return `${input.smsName}: ${name} is behind in ${input.courseName} (${Math.round(
     input.actual,
   )}% done, should be about ${Math.round(input.expected)}%). Please check in with ${name}.`;
 }
@@ -101,8 +102,9 @@ export function missingAssignmentsMessage(input: {
   studentName: string;
   courseName: string;
   missing: number;
+  smsName: string;
 }): string {
-  return `Salaam Institute: ${firstName(input.studentName)} has ${input.missing} missing assignment${
+  return `${input.smsName}: ${firstName(input.studentName)} has ${input.missing} missing assignment${
     input.missing === 1 ? "" : "s"
   } in ${input.courseName}.`;
 }
@@ -154,6 +156,7 @@ export async function checkPaceAlerts(
   const sends: Promise<SmsResult>[] = [];
   if (behind) {
     const body = paceBehindMessage({
+      smsName: ctx.smsName,
       studentName: input.studentName,
       courseName: input.courseName,
       actual: evaluation.actual as number,
@@ -174,6 +177,7 @@ export async function checkPaceAlerts(
   }
   if (missingTooMany) {
     const body = missingAssignmentsMessage({
+      smsName: ctx.smsName,
       studentName: input.studentName,
       courseName: input.courseName,
       missing: input.missingAssignments as number,

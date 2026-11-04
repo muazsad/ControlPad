@@ -123,12 +123,12 @@ describe("checkPaceAlerts", () => {
 describe("messages", () => {
   it("are short and singular/plural aware", () => {
     assert.equal(
-      missingAssignmentsMessage({ studentName: "Amina Noor", courseName: "Biology", missing: 1 }),
-      "Salaam Institute: Amina has 1 missing assignment in Biology.",
+      missingAssignmentsMessage({ studentName: "Amina Noor", courseName: "Biology", missing: 1, smsName: "Test School" }),
+      "Test School: Amina has 1 missing assignment in Biology.",
     );
     assert.equal(
-      paceBehindMessage({ studentName: "Amina Noor", courseName: "Algebra", actual: 40, expected: 55 }),
-      "Salaam Institute: Amina is behind in Algebra (40% done, should be about 55%). Please check in with Amina.",
+      paceBehindMessage({ studentName: "Amina Noor", courseName: "Algebra", actual: 40, expected: 55, smsName: "Test School" }),
+      "Test School: Amina is behind in Algebra (40% done, should be about 55%). Please check in with Amina.",
     );
   });
 });

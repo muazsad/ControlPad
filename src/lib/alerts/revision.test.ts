@@ -67,7 +67,7 @@ describe("checkRevisionOverdueAlerts", () => {
     assert.ok(sent.every((s) => s.dedupeKey === "revision_overdue:s1:2026-W42"));
     assert.equal(
       sent[0].body,
-      "Salaam Institute: Yusuf hasn't revised Juz 3, 7 and 2 more in over a month. Please encourage review at home.",
+      "Test School: Yusuf hasn't revised Juz 3, 7 and 2 more in over a month. Please encourage review at home.",
     );
   });
 

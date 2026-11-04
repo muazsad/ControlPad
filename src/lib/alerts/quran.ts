@@ -231,7 +231,7 @@ export async function checkQuranSlipAlerts(
   for (const student of students) {
     const name = studentName(student);
     const parentBody =
-      `Salaam Institute: ${name} has not had a new Quran lesson recorded in ${student.daysSinceLastLesson} day${student.daysSinceLastLesson === 1 ? "" : "s"}. ` +
+      `${ctx.smsName}: ${name} has not had a new Quran lesson recorded in ${student.daysSinceLastLesson} day${student.daysSinceLastLesson === 1 ? "" : "s"}. ` +
       `Please reach out to the school if you have questions.`;
     const adminBody =
       `ControlPad: ${name}'s last Quran lesson was ${student.daysSinceLastLesson} day${student.daysSinceLastLesson === 1 ? "" : "s"} ago (threshold: ${settings.quranInactivityDays}).`;

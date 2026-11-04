@@ -177,7 +177,7 @@ export async function checkPaymentOverdueAlerts(
 
   for (const student of overdueStudents) {
     const name = studentName(student);
-    const parentBody = `Salaam Institute: ${name}'s tuition for ${monthDisplay} has not been received. Please contact the school.`;
+    const parentBody = `${ctx.smsName}: ${name}'s tuition for ${monthDisplay} has not been received. Please contact the school.`;
     const adminBody = `ControlPad: ${name}'s tuition for ${monthDisplay} is overdue (due day: ${settings.paymentDueDayOfMonth}).`;
 
     for (const guardian of student.guardians) {

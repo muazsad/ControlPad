@@ -35,8 +35,8 @@ describe("announcementRecipients", () => {
 
 describe("message helpers", () => {
   it("adds the school prefix once", () => {
-    assert.equal(announcementBody(" No school Monday "), "Salaam Institute: No school Monday");
-    assert.equal(announcementBody("Salaam Institute: hi"), "Salaam Institute: hi");
+    assert.equal(announcementBody(" No school Monday ", "Test School"), "Test School: No school Monday");
+    assert.equal(announcementBody("Test School: hi", "Test School"), "Test School: hi");
   });
 
   it("counts SMS segments", () => {

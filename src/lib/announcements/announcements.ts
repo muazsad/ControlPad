@@ -5,6 +5,7 @@
 // Client-safe: imported by the compose form, so no server imports here.
 
 import { localTimeToUtc } from "@/lib/schools/clock";
+import { withSchoolPrefix } from "@/lib/schools/school-context";
 
 // ── Tunable constants ────────────────────────────────────────────────────────
 
@@ -25,7 +26,6 @@ export const ANNOUNCEMENT_DEDUPE_HOURS = 24 * 30;
 /** Audience token for students without a schedule group. */
 export const UNGROUPED = "ungrouped";
 
-const PREFIX = "Salaam Institute: ";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -55,9 +55,8 @@ export type ParsedAnnouncement = {
 
 // ── Message ──────────────────────────────────────────────────────────────────
 
-export function announcementBody(message: string): string {
-  const trimmed = message.trim();
-  return /^salaam institute/i.test(trimmed) ? trimmed : `${PREFIX}${trimmed}`;
+export function announcementBody(message: string, smsName: string): string {
+  return withSchoolPrefix(message, smsName);
 }
 
 /** Rough SMS segment count (GSM-7 vs Unicode), for the compose form. */

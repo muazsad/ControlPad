@@ -55,8 +55,8 @@ describe("specialDayRecipients", () => {
 
 describe("specialDayNoticeBody / dedupe key", () => {
   it("prefixes the school name once", () => {
-    assert.equal(specialDayNoticeBody("No GCVS today."), "Salaam Institute: No GCVS today.");
-    assert.equal(specialDayNoticeBody("Salaam Institute: hi"), "Salaam Institute: hi");
+    assert.equal(specialDayNoticeBody("No GCVS today.", "Test School"), "Test School: No GCVS today.");
+    assert.equal(specialDayNoticeBody("Test School: hi", "Test School"), "Test School: hi");
   });
 
   it("changes the key when the message changes", () => {
@@ -125,7 +125,7 @@ describe("sendSpecialDayNotice", () => {
     assert.equal(sent.length, 2);
     assert.equal(sent[0].triggerType, "special_day");
     assert.equal(sent[0].studentId, null);
-    assert.match(sent[0].body, /^Salaam Institute: Field trip Thursday/);
+    assert.match(sent[0].body, /^Test School: Field trip Thursday/);
     assert.equal(sent[0].dedupeKey, specialDayDedupeKey("2026-10-22", fieldTrip.parentMessage!));
     assert.deepEqual(notified, ["2026-10-22"]);
   });

@@ -69,7 +69,7 @@ export async function sendAnnouncement(
       announcement.audience,
       await database.getActiveStudents(),
     );
-    const body = announcementBody(announcement.message);
+    const body = announcementBody(announcement.message, ctx.smsName);
     const results = await Promise.all(
       phones.map((phone) =>
         send({
