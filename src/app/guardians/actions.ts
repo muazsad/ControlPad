@@ -96,7 +96,7 @@ export async function enableGuardianLogin(
   _prev: ActionState,
   form: FormData,
 ): Promise<ActionState> {
-  await requireRole(["admin"]);
+  const profile = await requireRole(["admin"]);
 
   const guardianId = text(form, "guardian_id");
   const email = text(form, "email");
@@ -126,6 +126,7 @@ export async function enableGuardianLogin(
     fullName: guardian.full_name,
     role: "parent",
     phone: guardian.phone,
+    schoolId: profile.schoolId,
   });
 
   if (result.error) return { error: result.error };

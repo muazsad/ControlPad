@@ -31,6 +31,7 @@ export default async function StaffPage() {
   const { data } = await supabase
     .from("profiles")
     .select("id, full_name, role, phone, created_at")
+    .eq("school_id", profile.schoolId)
     .in("role", ["admin", "moderator"])
     .order("role", { ascending: true });
 

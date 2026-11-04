@@ -7,6 +7,8 @@ type CreateAccountInput = {
   fullName: string;
   role: AppRole;
   phone?: string | null;
+  /** The admin's school; the new login belongs to it. */
+  schoolId: string;
 };
 
 type CreateAccountResult =
@@ -27,6 +29,7 @@ export async function createAuthUserWithProfile({
   fullName,
   role,
   phone = null,
+  schoolId,
 }: CreateAccountInput): Promise<CreateAccountResult> {
   const admin = createServiceClient();
 
@@ -37,6 +40,12 @@ export async function createAuthUserWithProfile({
       email_confirm: true,
       user_metadata: { full_name: fullName },
     });
+
+  // One school per login: an existing account can't join another school.
+  // Don't say which school it belongs to.
+  if (createError && /already (been )?registered|already exists/i.test(createError.message)) {
+    return { userId: null, error: "This email is already used by another ControlPad account." };
+  }
 
   if (createError || !created.user) {
     return {
@@ -52,6 +61,7 @@ export async function createAuthUserWithProfile({
     role,
     full_name: fullName,
     phone,
+    school_id: schoolId,
   });
 
   if (profileError) {
