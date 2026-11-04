@@ -1,7 +1,9 @@
 import { NextResponse, type NextRequest } from "next/server";
 
 import { handleInboundSms } from "@/lib/absence-reports/inbound";
+import { loadSchoolContext } from "@/lib/schools/schools-data";
 import { isValidTwilioSignature } from "@/lib/sms/twilio-signature";
+import { createServiceClient } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
 
@@ -45,10 +47,25 @@ export async function POST(request: NextRequest) {
   }
 
   const from = params.From?.trim();
-  if (!from) return twiml();
+  const to = params.To?.trim();
+  if (!from || !to) return twiml();
+
+  // Which school? The one whose Twilio number the parent texted.
+  // tenant-scope-ok: looking up which school owns this Twilio number
+  const { data: config, error: lookupError } = await createServiceClient()
+    .from("school_sms_config")
+    .select("school_id")
+    .eq("twilio_phone_number", to)
+    .maybeSingle();
+  if (lookupError) return twiml(500);
+  const ctx = config ? await loadSchoolContext(config.school_id as string) : null;
+  if (!ctx) {
+    console.error("Inbound SMS for a number no school owns.");
+    return twiml();
+  }
 
   try {
-    await handleInboundSms({
+    await handleInboundSms(ctx, {
       from,
       body: params.Body ?? "",
       twilioSid: params.MessageSid ?? params.SmsSid ?? null,
