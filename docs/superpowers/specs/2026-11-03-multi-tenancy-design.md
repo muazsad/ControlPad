@@ -134,8 +134,8 @@ for the service role).
 4. `…_tick_all_day.sql`: tick every 10 minutes around the clock (§7.2).
 
 Steps 1–3 run inside a transaction each. Re-running is safe (`if not exists`, `on conflict do nothing`).
-Run the full set against a **copy** of production first (SETUP §… gets a "restore a backup to a branch
-project" section).
+Run the full set against a **copy** of production first (a new SETUP.md section explains restoring a
+backup into a scratch Supabase project).
 
 ---
 
