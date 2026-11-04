@@ -2,7 +2,7 @@
 
 The accounts and keys **you** need to create. Claude Code can't make accounts or handle your secrets, so this is the part that's on you — it's mostly copy-and-paste. Exact button labels on these third-party sites change occasionally; the official docs (linked) are the final word.
 
-> Twilio is optional until you want texts to actually go out — until then every alert is logged on the Messages page.
+> Twilio is optional until a school wants texts to actually go out — until then every alert is logged on that school's Messages page. Each school sets up its own Twilio (§3).
 
 ---
 
@@ -15,7 +15,7 @@ The accounts and keys **you** need to create. Claude Code can't make accounts or
 ## 1. Supabase (database + auth)
 
 1. Create an account and a new **project** at <https://supabase.com>. Pick a strong database password and save it.
-2. Choose a region close to Massachusetts (e.g. US East).
+2. Choose a US region (e.g. US East).
 3. Once the project is ready, go to **Project Settings → API** and copy three values:
    - **Project URL**
    - **anon public** key
@@ -29,22 +29,21 @@ The accounts and keys **you** need to create. Claude Code can't make accounts or
 3. You'll add environment variables here (next section) under the project's **Settings → Environment Variables**.
 4. Docs: <https://vercel.com/docs>
 
-## 3. Twilio (SMS) — can wait until you're ready to text
+## 3. Twilio (SMS) — each school brings its own
 
-ControlPad works without Twilio: every alert is generated and logged on the **Messages** page (admin sidebar) as "Not sent (dry run)". Nothing is texted until the three Twilio variables below are set. You can buy the number whenever you're ready.
+Every school texts from **its own** Twilio account and number. Nothing goes in Vercel for this: a school's admin enters the details in **Settings → Texting**, and ControlPad stores the Auth Token encrypted (with `SMS_CREDENTIALS_KEY`, §4). Until a school does this, its alerts are only logged on its **Messages** page as dry runs.
 
-**When you're ready:**
+**For each school (its admin does this):**
 
 1. Create an account at <https://www.twilio.com> and upgrade from trial (trial accounts can only text numbers you've verified).
 2. Buy an SMS-capable number (Phone Numbers → Buy a number). Rough cost: ~$1–2/month plus well under a cent per text — check current pricing.
-3. **Register for A2P 10DLC** (Messaging → Regulatory Compliance). US carriers block automated texts from local numbers that aren't registered. You register your organization ("brand") and describe the use case ("campaign", e.g. school attendance and account notifications to parents who provided their number). Approval usually takes days to a couple of weeks and has small one-time and monthly fees — start this early. A toll-free number is an alternative with its own verification step. Docs: <https://www.twilio.com/docs/messaging/compliance/a2p-10dlc>
-4. Copy the **Account SID**, **Auth Token** (secret), and your number in E.164 format (e.g. `+1413...`).
-5. In Vercel, add `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_PHONE_NUMBER`, plus `SMS_MODE=test` and `SMS_TEST_NUMBER=<your cell>`. Redeploy.
-6. **Incoming texts (parent-reported absences):** in Twilio → Phone Numbers → your number → *Messaging configuration*, set **"A message comes in"** to Webhook, `https://control-pad.vercel.app/api/sms/inbound`, HTTP **POST**. Save. ControlPad checks Twilio's signature on every request using `TWILIO_AUTH_TOKEN`, so nothing else is needed. (Only if your public URL ever differs from what the app sees, set `TWILIO_INBOUND_URL` to the exact URL entered in Twilio.) Before this is set up you can try it from **Messages → Incoming texts → Simulate text**.
-7. On **Messages**, press **Send me a test text** (uses your phone from the Staff page). In test mode every alert goes to your cell, labelled with who it was meant for. Watch it for a few school days.
-8. When it looks right, change `SMS_MODE` to `live` (or delete it) and redeploy. Parents start receiving texts.
+3. **Register for A2P 10DLC** (Messaging → Regulatory Compliance) — the school is the "brand", the use case ("campaign") is attendance and account notifications to parents who gave their number. US carriers block unregistered automated texts. Approval takes days to a couple of weeks and has small fees. A toll-free number with toll-free verification is the alternative. Docs: <https://www.twilio.com/docs/messaging/compliance/a2p-10dlc>
+4. In ControlPad, **Settings → Texting**: paste the **Account SID**, **Auth Token**, the number, and a test number (your cell). **Save & verify** checks the details with Twilio and that the number belongs to that account.
+5. **Incoming texts:** in Twilio → Phone Numbers → the number → *Messaging configuration*, set **"A message comes in"** to Webhook, `https://control-pad.vercel.app/api/sms/inbound` (the Texting card shows the exact URL), HTTP **POST**. ControlPad finds the school by the number texted and checks Twilio's signature with that school's token. (Only if the public URL ever differs from what the app sees, set `TWILIO_INBOUND_URL` in Vercel to the exact URL entered in Twilio.)
+6. Choose **Test** on the Texting card and press **Send me a test text** on **Messages**. In test mode every alert goes to the test number, labelled with who it was meant for.
+7. Choose **Live**. Texts keep going to the test number until a **platform admin approves** the school on `/platform` (§7) — do that once the A2P registration is approved.
 
-To stop all texting at any time, set `SMS_MODE=off` and redeploy.
+**Emergency stop for every school:** set `SMS_MODE=off` in Vercel and redeploy (`SMS_MODE=test` holds every school at test). Unset, each school's own mode applies.
 
 ---
 
@@ -57,23 +56,20 @@ Put these in a local `.env.local` (must be gitignored) **and** in Vercel's proje
 | `NEXT_PUBLIC_SUPABASE_URL` | Supabase → API → Project URL | yes |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase → API → anon public | yes |
 | `SUPABASE_SERVICE_ROLE_KEY` | Supabase → API → service_role | **NO — secret** |
-| `TWILIO_ACCOUNT_SID` | Twilio Console | **NO — secret** |
-| `TWILIO_AUTH_TOKEN` | Twilio Console | **NO — secret** |
-| `TWILIO_PHONE_NUMBER` | your Twilio number | yes-ish (keep with the rest) |
+| `SMS_CREDENTIALS_KEY` | you generate it: `openssl rand -base64 32` (32 random bytes, base64). Encrypts every school's Twilio token. Losing it means each school re-enters its token; leaking it with a database dump exposes their Twilio accounts. Never change it casually. | **NO — secret** |
 | `CRON_SECRET` | you invent a long random string | **NO — secret** |
-| `SMS_MODE` | `off`, `test`, or `live` (defaults to `live` once Twilio is set, `off` before) | no |
-| `SMS_TEST_NUMBER` | your cell in E.164; all texts go here when `SMS_MODE=test` | keep private |
+| `SMS_MODE` | optional ceiling for every school: `off` or `test`. Unset = each school's own setting. | no |
 | `TWILIO_INBOUND_URL` | optional — only if Twilio's webhook URL differs from the app's own URL | no |
 
-`STRIPE_*` variables come later, only if/when you add online payments.
+`TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_PHONE_NUMBER` and `SMS_TEST_NUMBER` are **no longer used** (each school's Twilio lives in Settings → Texting). Delete them from Vercel after the multi-school release.
 
-> **Rule of thumb:** anything starting with `NEXT_PUBLIC_` is visible in the browser. Never give a secret that prefix. The `service_role` key and Twilio token must stay server-side only.
+> **Rule of thumb:** anything starting with `NEXT_PUBLIC_` is visible in the browser. Never give a secret that prefix. The `service_role` key and `SMS_CREDENTIALS_KEY` must stay server-side only.
 
 ---
 
 ## 5. Attendance scheduler (Supabase, every 10 minutes)
 
-Vercel's free plan only allows once-a-day jobs, but attendance alerts depend on each schedule group's times. So Supabase calls `/api/cron/attendance-tick` every 10 minutes (set up by migration `20261010000100_attendance_tick_scheduler.sql`). It needs two secrets stored in Supabase Vault — do this once, yourself, in **Supabase → SQL Editor**:
+Vercel's free plan only allows once-a-day jobs, but attendance alerts depend on each schedule group's times. So Supabase calls `/api/cron/attendance-tick` every 10 minutes, around the clock (migration `20261010000100_attendance_tick_scheduler.sql`, made 24-hour by `20261103000300_tick_all_day.sql`); each call runs every school on its own local time. It needs two secrets stored in Supabase Vault — do this once, yourself, in **Supabase → SQL Editor**:
 
 ```sql
 select vault.create_secret('https://YOUR-APP.vercel.app', 'controlpad_app_url');
@@ -97,17 +93,51 @@ then merge/push to `main` so Vercel deploys.
 
 ---
 
+## 7. Platform admins (who approves live texting)
+
+Anyone can sign up and create a school. Live texting stays off until a **platform admin** approves it on `/platform`. Add yourself once, after you've signed in at least once, in **Supabase → SQL Editor** (this is data, not a schema change):
+
+```sql
+insert into platform_admins (user_id)
+select id from auth.users where email = 'you@example.com';
+```
+
+`/platform` lists every school (counts only — no student or message data) with **Approve live** / **Revoke**.
+
+## 8. Sign-up emails
+
+`/signup` sends a confirmation email. Supabase's built-in mailer only sends a few emails an hour, so before announcing sign-up, set **Authentication → Emails → SMTP Settings** to a real provider (e.g. Resend, Postmark). Also add your site URL and `https://YOUR-APP/auth/callback` under **Authentication → URL Configuration → Redirect URLs**. Docs: <https://supabase.com/docs/guides/auth/auth-smtp>
+
+## 9. Testing migrations safely (multi-school release)
+
+The multi-school migrations (`20261103*`) rewrite every security rule. Try them on a copy first:
+
+1. Docker running, then in the repo: `supabase start` and `supabase test db` — runs `supabase/tests/tenant_isolation.test.sql` (two schools; checks neither can see or write the other's data).
+2. Make a scratch Supabase project, restore a recent backup of production into it (Database → Backups, or `supabase db dump` / `psql`), point a Vercel preview at it, then `supabase db push` there.
+3. On the preview: sign up, create a school, add a student — and check the old data is invisible.
+4. Then `supabase db push` to production and deploy straight away (existing logins see "Set up your school" until the new code is live).
+
+Existing data moves into a hidden **"Pre-multi-tenant archive"** school that nobody can see. Recreate your school by signing in (or up) and going through onboarding. When you're sure the old data isn't needed:
+
+```
+node --env-file=.env.local scripts/delete-archive-school.mjs
+```
+
+It prints counts and asks you to type `DELETE`.
+
+---
+
 ## Quick checklist
 
 - [ ] GitHub account ready
 - [ ] Supabase project created; URL + anon + service_role keys copied
 - [ ] `.env.local` created and gitignored
 - [ ] Vercel account connected to the repo (when deploying)
-- [ ] `supabase db push` run for the latest migrations
+- [ ] `SMS_CREDENTIALS_KEY` generated and added to Vercel + `.env.local`
+- [ ] `supabase db push` run for the latest migrations (after testing on a copy, §9)
 - [ ] Vault secrets `controlpad_app_url` + `controlpad_cron_secret` created (§5)
-- [ ] Twilio account + number + A2P 10DLC registration + SID/token (when ready to text)
-- [ ] `SMS_MODE=test` + `SMS_TEST_NUMBER` tried before switching to live
+- [ ] Custom SMTP + redirect URLs set in Supabase Auth (§8)
+- [ ] Yourself added to `platform_admins` (§7)
 - [ ] `CRON_SECRET` generated
 - [ ] All variables added to Vercel project settings
-
-
+- [ ] Per school: Twilio number + A2P registration, details entered in Settings → Texting, tested, approved on `/platform`
