@@ -142,7 +142,11 @@ export default async function AnnouncementsPage() {
   const today = localDate(new Date(), profile.timeZone);
 
   return (
-    <AppShell fullName={profile.fullName} role={profile.role}>
+    <AppShell
+      fullName={profile.fullName}
+      role={profile.role}
+      schoolName={profile.schoolName}
+    >
       <div className="mx-auto max-w-5xl space-y-6">
         <PageHeader
           title="Announcements"

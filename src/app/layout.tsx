@@ -14,8 +14,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "ControlPad — Salaam Institute",
-  description: "Admin & visibility dashboard for Salaam Institute",
+  title: "ControlPad",
+  description: "School admin, alerts and parent texting",
 };
 
 export default function RootLayout({

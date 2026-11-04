@@ -38,14 +38,18 @@ export default async function StudentsPage() {
   }));
 
   return (
-    <AppShell fullName={profile.fullName} role={profile.role}>
+    <AppShell
+      fullName={profile.fullName}
+      role={profile.role}
+      schoolName={profile.schoolName}
+    >
       <div className="mx-auto max-w-6xl space-y-6">
         <PageHeader
           title="Students"
           description={
             canManage
               ? "Manage student profiles, enrollment details, and guardian links."
-              : "Your children's records at Salaam Institute."
+              : `Your children's records at ${profile.schoolName}.`
           }
           action={
             canManage ? (

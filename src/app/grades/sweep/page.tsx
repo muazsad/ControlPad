@@ -128,7 +128,11 @@ export default async function GradeSweepPage() {
   rows.sort((a, b) => staleRank(a) - staleRank(b));
 
   return (
-    <AppShell fullName={profile.fullName} role={profile.role}>
+    <AppShell
+      fullName={profile.fullName}
+      role={profile.role}
+      schoolName={profile.schoolName}
+    >
       <div className="mx-auto max-w-6xl space-y-6">
         <PageHeader
           title="Weekly grade sweep"

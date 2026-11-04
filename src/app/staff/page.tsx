@@ -38,7 +38,11 @@ export default async function StaffPage() {
   const staff = (data ?? []) as StaffProfile[];
 
   return (
-    <AppShell fullName={profile.fullName} role={profile.role}>
+    <AppShell
+      fullName={profile.fullName}
+      role={profile.role}
+      schoolName={profile.schoolName}
+    >
       <div className="mx-auto max-w-5xl space-y-6">
         <PageHeader
           title="Staff"

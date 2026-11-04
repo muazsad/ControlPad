@@ -235,7 +235,11 @@ export default async function StudentDetailPage({
   }
 
   return (
-    <AppShell fullName={profile.fullName} role={profile.role}>
+    <AppShell
+      fullName={profile.fullName}
+      role={profile.role}
+      schoolName={profile.schoolName}
+    >
       <div className="mx-auto max-w-4xl space-y-6">
         <Button asChild variant="ghost" size="sm" className="-ml-2 w-fit">
           <Link href="/students">

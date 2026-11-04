@@ -903,7 +903,11 @@ export default async function HomePage() {
   }
 
   return (
-    <AppShell fullName={profile.fullName} role={profile.role}>
+    <AppShell
+      fullName={profile.fullName}
+      role={profile.role}
+      schoolName={profile.schoolName}
+    >
       {profile.role === "parent" ? (
         <ParentDashboard fullName={profile.fullName} students={children} />
       ) : profile.role === "admin" && adminDailySummary ? (

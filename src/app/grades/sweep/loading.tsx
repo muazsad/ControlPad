@@ -7,7 +7,11 @@ export default async function Loading() {
   const profile = await getCurrentProfile();
 
   return (
-    <AppShell fullName={profile.fullName} role={profile.role}>
+    <AppShell
+      fullName={profile.fullName}
+      role={profile.role}
+      schoolName={profile.schoolName}
+    >
       <div className="mx-auto max-w-6xl space-y-6">
         <Skeleton className="h-10 w-72" />
         <TableSkeleton rows={10} />

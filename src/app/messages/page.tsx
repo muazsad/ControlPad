@@ -151,7 +151,11 @@ export default async function MessagesPage() {
   const inboundRows = inboundError ? [] : ((inboundData ?? []) as InboundRow[]);
 
   return (
-    <AppShell fullName={profile.fullName} role={profile.role}>
+    <AppShell
+      fullName={profile.fullName}
+      role={profile.role}
+      schoolName={profile.schoolName}
+    >
       <div className="mx-auto max-w-6xl space-y-6">
         <PageHeader
           title="Messages"

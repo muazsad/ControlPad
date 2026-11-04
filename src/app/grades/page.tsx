@@ -83,7 +83,11 @@ export default async function GradesPage({
     settingsData?.grade_floor == null ? null : Number(settingsData.grade_floor);
 
   return (
-    <AppShell fullName={profile.fullName} role={profile.role}>
+    <AppShell
+      fullName={profile.fullName}
+      role={profile.role}
+      schoolName={profile.schoolName}
+    >
       <div className="mx-auto max-w-6xl space-y-6">
         <PageHeader
           title="Grades"

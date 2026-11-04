@@ -15,7 +15,11 @@ export default async function NewStudentPage() {
   const groups = await getScheduleGroups(profile.schoolId);
 
   return (
-    <AppShell fullName={profile.fullName} role={profile.role}>
+    <AppShell
+      fullName={profile.fullName}
+      role={profile.role}
+      schoolName={profile.schoolName}
+    >
       <div className="mx-auto max-w-3xl space-y-6">
         <Button asChild variant="ghost" size="sm" className="-ml-2 w-fit">
           <Link href="/students">

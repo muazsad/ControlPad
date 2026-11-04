@@ -132,7 +132,11 @@ export default async function SettingsPage() {
   }
 
   return (
-    <AppShell fullName={profile.fullName} role={profile.role}>
+    <AppShell
+      fullName={profile.fullName}
+      role={profile.role}
+      schoolName={profile.schoolName}
+    >
       <div className="mx-auto max-w-7xl space-y-6">
         <PageHeader
           title="Settings"

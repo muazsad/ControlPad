@@ -298,7 +298,7 @@ export async function checkTardyThresholdAlerts(
   const messages: SendSmsInput[] = [];
 
   for (const student of students) {
-    const body = `${studentName(student)} has ${student.tardyCount} tardies in their last ${TARDY_WINDOW_SCHOOL_DAYS} school days, meeting the ControlPad threshold of ${settings.tardiesPerWeek}. Please contact Salaam Institute if you have questions.`;
+    const body = `${studentName(student)} has ${student.tardyCount} tardies in their last ${TARDY_WINDOW_SCHOOL_DAYS} school days, meeting the ControlPad threshold of ${settings.tardiesPerWeek}. Please contact ${ctx.smsName} if you have questions.`;
     for (const guardian of student.guardians) {
       messages.push({
         schoolId: ctx.schoolId,

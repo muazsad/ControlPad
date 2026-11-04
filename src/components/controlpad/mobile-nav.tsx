@@ -23,9 +23,10 @@ export type NavItem = {
 
 type MobileNavProps = {
   items: NavItem[];
+  schoolName: string;
 };
 
-export function MobileNav({ items }: MobileNavProps) {
+export function MobileNav({ items, schoolName }: MobileNavProps) {
   const pathname = usePathname();
 
   return (
@@ -44,7 +45,7 @@ export function MobileNav({ items }: MobileNavProps) {
         <DialogTitle className="sr-only">Navigation</DialogTitle>
         <div className="flex h-full flex-col bg-sidebar text-sidebar-foreground">
           <div className="border-b border-sidebar-border px-5 py-4">
-            <BrandMark />
+            <BrandMark schoolName={schoolName} />
           </div>
           <nav className="space-y-1 px-3 py-4">
             {items.map((item) => {
