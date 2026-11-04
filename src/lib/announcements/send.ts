@@ -2,7 +2,8 @@
 // goes through sendSms — SMS_MODE, logging and dedupe apply.
 // Spec: docs/superpowers/specs/2026-10-11-announcements-design.md
 
-import { getSmsConfig, sendSms, type SendSmsInput, type SmsResult } from "@/lib/sms/send-sms";
+import { loadSchoolSmsConfig } from "@/lib/sms/school-sms-config";
+import { sendSms, type SendSmsInput, type SmsResult } from "@/lib/sms/send-sms";
 import { createServiceClient } from "@/lib/supabase/server";
 
 import {
@@ -12,6 +13,7 @@ import {
   type AnnouncementStudent,
   type Audience,
 } from "./announcements";
+import type { SchoolContext } from "@/lib/schools/school-context";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -46,6 +48,7 @@ export type AnnouncementSendResult =
 // ── Sending ──────────────────────────────────────────────────────────────────
 
 export async function sendAnnouncement(
+  ctx: SchoolContext,
   id: string,
   deps: {
     database?: AnnouncementDatabase;
@@ -54,10 +57,10 @@ export async function sendAnnouncement(
     mode?: string;
   } = {},
 ): Promise<AnnouncementSendResult> {
-  const database = deps.database ?? createSupabaseAnnouncementDatabase();
+  const database = deps.database ?? createSupabaseAnnouncementDatabase(ctx);
   const send = deps.sendSms ?? sendSms;
   const now = deps.now ?? (() => new Date());
-  const mode = deps.mode ?? getSmsConfig().mode;
+  const mode = deps.mode ?? (await loadSchoolSmsConfig(ctx.schoolId)).mode;
 
   const announcement = await database.claim(id);
   if (!announcement) return { status: "not_claimed" };
@@ -67,10 +70,11 @@ export async function sendAnnouncement(
       announcement.audience,
       await database.getActiveStudents(),
     );
-    const body = announcementBody(announcement.message);
+    const body = announcementBody(announcement.message, ctx.smsName);
     const results = await Promise.all(
       phones.map((phone) =>
         send({
+          schoolId: ctx.schoolId,
           recipientPhone: phone,
           recipientType: "parent",
           studentId: null,
@@ -111,14 +115,19 @@ export async function sendAnnouncement(
 
 /** Called by the 10-minute tick: sends every scheduled announcement that's due. */
 export async function sendDueAnnouncements(
+  ctx: SchoolContext,
   now: Date,
-  deps: { database?: AnnouncementDatabase; sendSms?: (input: SendSmsInput) => Promise<SmsResult> } = {},
+  deps: {
+    database?: AnnouncementDatabase;
+    sendSms?: (input: SendSmsInput) => Promise<SmsResult>;
+    mode?: string;
+  } = {},
 ): Promise<{ sent: number }> {
-  const database = deps.database ?? createSupabaseAnnouncementDatabase();
+  const database = deps.database ?? createSupabaseAnnouncementDatabase(ctx);
   const due = await database.findDue(now);
   let sent = 0;
   for (const id of due) {
-    const result = await sendAnnouncement(id, { database, sendSms: deps.sendSms });
+    const result = await sendAnnouncement(ctx, id, { database, sendSms: deps.sendSms, mode: deps.mode });
     if (result.status === "sent") sent += 1;
   }
   return { sent };
@@ -133,13 +142,14 @@ type StudentRow = {
     | null;
 };
 
-export function createSupabaseAnnouncementDatabase(): AnnouncementDatabase {
+export function createSupabaseAnnouncementDatabase(ctx: SchoolContext): AnnouncementDatabase {
   const supabase = createServiceClient();
   return {
     async claim(id) {
       const { data, error } = await supabase
         .from("announcements")
         .update({ status: "sending" })
+        .eq("school_id", ctx.schoolId)
         .eq("id", id)
         .eq("status", "scheduled")
         .select("id, message, audience")
@@ -156,6 +166,7 @@ export function createSupabaseAnnouncementDatabase(): AnnouncementDatabase {
       const { data, error } = await supabase
         .from("announcements")
         .select("id")
+        .eq("school_id", ctx.schoolId)
         .eq("status", "scheduled")
         .lte("send_at", now.toISOString())
         .order("send_at", { ascending: true });
@@ -170,6 +181,7 @@ export function createSupabaseAnnouncementDatabase(): AnnouncementDatabase {
       const { data, error } = await supabase
         .from("students")
         .select("schedule_group_id, student_guardians(guardians(phone))")
+        .eq("school_id", ctx.schoolId)
         .eq("enrollment_status", "active");
       if (error) throw new Error(error.message);
       return ((data ?? []) as StudentRow[]).map((row) => ({
@@ -180,7 +192,11 @@ export function createSupabaseAnnouncementDatabase(): AnnouncementDatabase {
       }));
     },
     async finish(id, patch) {
-      const { error } = await supabase.from("announcements").update(patch).eq("id", id);
+      const { error } = await supabase
+        .from("announcements")
+        .update(patch)
+        .eq("school_id", ctx.schoolId)
+        .eq("id", id);
       if (error) throw new Error(error.message);
     },
   };

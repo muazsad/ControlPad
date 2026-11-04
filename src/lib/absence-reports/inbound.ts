@@ -18,6 +18,7 @@ import {
   type InboundChild,
   type PendingFollowUp,
 } from "./parse";
+import type { SchoolContext } from "@/lib/schools/school-context";
 
 // ── Tunable constants ────────────────────────────────────────────────────────
 
@@ -70,6 +71,7 @@ export type InboundResult = {
 // ── Runner ───────────────────────────────────────────────────────────────────
 
 export async function handleInboundSms(
+  ctx: SchoolContext,
   input: {
     from: string;
     body: string;
@@ -82,7 +84,7 @@ export async function handleInboundSms(
     sendSms?: (input: SendSmsInput) => Promise<SmsResult>;
   } = {},
 ): Promise<InboundResult> {
-  const database = deps.database ?? createSupabaseInboundDatabase();
+  const database = deps.database ?? createSupabaseInboundDatabase(ctx);
   const send = deps.sendSms ?? sendSms;
   const now = input.now ?? new Date();
   const from = toE164(input.from) ?? input.from.trim();
@@ -104,7 +106,7 @@ export async function handleInboundSms(
         )
       : null;
 
-  const clock = schoolClock(now);
+  const clock = schoolClock(now, ctx.timeZone);
   const plan = planInboundSms({
     body,
     knownSender: guardians.length > 0,
@@ -141,11 +143,12 @@ export async function handleInboundSms(
     );
     if (plan.resolvesFollowUpId) await database.resolveFollowUp(plan.resolvesFollowUpId, now);
     messages.push({
+      schoolId: ctx.schoolId,
       recipientPhone: from,
       recipientType: "parent",
       studentId: plan.children.length === 1 ? plan.children[0].id : null,
       triggerType: "absence_report_reply",
-      body: acknowledgementMessage(plan.children, plan.date, clock.date),
+      body: acknowledgementMessage(plan.children, plan.date, clock.date, ctx.smsName),
       dedupeKey: `inbound:${inbound.id}`,
       dedupeWindowHours: REPLY_DEDUPE_HOURS,
     });
@@ -159,11 +162,12 @@ export async function handleInboundSms(
       pending_reason: plan.reason,
     });
     messages.push({
+      schoolId: ctx.schoolId,
       recipientPhone: from,
       recipientType: "parent",
       studentId: null,
       triggerType: "absence_report_reply",
-      body: askWhichChildMessage(plan.children),
+      body: askWhichChildMessage(plan.children, ctx.smsName),
       dedupeKey: `inbound:${inbound.id}`,
       dedupeWindowHours: REPLY_DEDUPE_HOURS,
     });
@@ -181,6 +185,7 @@ export async function handleInboundSms(
     const forward = forwardToAdminMessage({ senderLabel, body: trimReason(body) });
     for (const phone of await database.getAdminPhones()) {
       messages.push({
+        schoolId: ctx.schoolId,
         recipientPhone: phone,
         recipientType: "admin",
         studentId: null,
@@ -205,7 +210,7 @@ type ChildRow = {
     | null;
 };
 
-export function createSupabaseInboundDatabase(): InboundDatabase {
+export function createSupabaseInboundDatabase(ctx: SchoolContext): InboundDatabase {
   const supabase = createServiceClient();
 
   return {
@@ -213,6 +218,7 @@ export function createSupabaseInboundDatabase(): InboundDatabase {
       const { data, error } = await supabase
         .from("inbound_messages")
         .select("id")
+        .eq("school_id", ctx.schoolId)
         .eq("twilio_sid", twilioSid)
         .maybeSingle();
       if (error) throw new Error(error.message);
@@ -222,6 +228,7 @@ export function createSupabaseInboundDatabase(): InboundDatabase {
       const { data, error } = await supabase
         .from("guardians")
         .select("id, full_name")
+        .eq("school_id", ctx.schoolId)
         .eq("phone", phone)
         .order("created_at", { ascending: true });
       if (error) throw new Error(error.message);
@@ -231,6 +238,7 @@ export function createSupabaseInboundDatabase(): InboundDatabase {
       const { data, error } = await supabase
         .from("student_guardians")
         .select("students(id, first_name, last_name, enrollment_status)")
+        .eq("school_id", ctx.schoolId)
         .in("guardian_id", guardianIds);
       if (error) throw new Error(error.message);
       const byId = new Map<string, InboundChild>();
@@ -251,6 +259,7 @@ export function createSupabaseInboundDatabase(): InboundDatabase {
       const { data, error } = await supabase
         .from("inbound_messages")
         .select("id, pending_date, pending_reason")
+        .eq("school_id", ctx.schoolId)
         .eq("from_phone", phone)
         .eq("outcome", "needs_child")
         .is("resolved_at", null)
@@ -269,7 +278,7 @@ export function createSupabaseInboundDatabase(): InboundDatabase {
     async insertInbound(row) {
       const { data, error } = await supabase
         .from("inbound_messages")
-        .insert(row)
+        .insert({ ...row, school_id: ctx.schoolId })
         .select("id")
         .single();
       if (error) throw new Error(error.message);
@@ -279,6 +288,7 @@ export function createSupabaseInboundDatabase(): InboundDatabase {
       const { error } = await supabase
         .from("inbound_messages")
         .update({ resolved_at: at.toISOString() })
+        .eq("school_id", ctx.schoolId)
         .eq("id", id);
       if (error) throw new Error(error.message);
     },
@@ -286,7 +296,10 @@ export function createSupabaseInboundDatabase(): InboundDatabase {
       if (rows.length === 0) return 0;
       const { data, error } = await supabase
         .from("absence_reports")
-        .upsert(rows, { onConflict: "student_id,date", ignoreDuplicates: true })
+        .upsert(
+          rows.map((row) => ({ ...row, school_id: ctx.schoolId })),
+          { onConflict: "student_id,date", ignoreDuplicates: true },
+        )
         .select("id");
       if (error) throw new Error(error.message);
       return (data ?? []).length;
@@ -295,6 +308,7 @@ export function createSupabaseInboundDatabase(): InboundDatabase {
       const { data, error } = await supabase
         .from("profiles")
         .select("phone")
+        .eq("school_id", ctx.schoolId)
         .eq("role", "admin")
         .not("phone", "is", null);
       if (error) throw new Error(error.message);

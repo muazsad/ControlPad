@@ -201,11 +201,12 @@ function enrollmentAnchorFor(input: {
 }
 
 export async function getEscalationStudents(
+  schoolId: string,
   asOfDate: string,
 ): Promise<EscalationStudentResult[]> {
   const supabase = await createClient();
   const endDate = dateOnly(asOfDate);
-  const calendar = await getSchoolCalendar();
+  const calendar = await getSchoolCalendar(schoolId);
   const schoolWindow = schoolDayWindowEnding(
     endDate,
     ESCALATION_WINDOW_DAYS,
@@ -230,7 +231,7 @@ export async function getEscalationStudents(
       .select(
         "grade_floor, tardies_per_week, quran_inactivity_days, payment_due_day, revision_overdue_school_days",
       )
-      .eq("id", 1)
+      .eq("school_id", schoolId)
       .single(),
     supabase
       .from("students")
@@ -263,7 +264,7 @@ export async function getEscalationStudents(
       .select("student_id, trigger_type, created_at")
       .gte("created_at", startIso)
       .lte("created_at", `${endDate}T23:59:59.999Z`),
-    loadPaceContext().then((context) => loadPaceEntries(supabase, context, endDate)),
+    loadPaceContext(schoolId).then((context) => loadPaceEntries(supabase, context, endDate)),
     supabase.from("student_memorized_juz").select("student_id, juz, marked_at"),
   ]);
 

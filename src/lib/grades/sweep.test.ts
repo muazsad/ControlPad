@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import {
-  easternDateKey,
+  schoolDateKey,
   isWithinSweepWindow,
   carryForward,
   parseGradeInput,
@@ -344,29 +344,36 @@ describe("carryForward", () => {
 });
 
 describe("Eastern sweep window", () => {
-  it("converts to the Eastern calendar day, not the UTC day", () => {
+  it("converts to the school's calendar day, not the UTC day", () => {
     // 02:30 UTC on Oct 11 is 22:30 EDT on Oct 10.
-    assert.equal(easternDateKey(new Date("2026-10-11T02:30:00Z")), "2026-10-10");
+    assert.equal(schoolDateKey(new Date("2026-10-11T02:30:00Z"), "America/New_York"), "2026-10-10");
     // 04:30 UTC on Jan 11 is 23:30 EST on Jan 10.
-    assert.equal(easternDateKey(new Date("2026-01-11T04:30:00Z")), "2026-01-10");
+    assert.equal(schoolDateKey(new Date("2026-01-11T04:30:00Z"), "America/New_York"), "2026-01-10");
   });
 
   it("counts today and the six days before it", () => {
     const now = new Date("2026-10-11T15:00:00Z"); // Sun Oct 11, Eastern
-    assert.equal(isWithinSweepWindow("2026-10-11T12:00:00Z", now), true);
-    assert.equal(isWithinSweepWindow("2026-10-05T12:00:00Z", now), true);
-    assert.equal(isWithinSweepWindow("2026-10-04T12:00:00Z", now), false);
+    assert.equal(isWithinSweepWindow("2026-10-11T12:00:00Z", now, "America/New_York"), true);
+    assert.equal(isWithinSweepWindow("2026-10-05T12:00:00Z", now, "America/New_York"), true);
+    assert.equal(isWithinSweepWindow("2026-10-04T12:00:00Z", now, "America/New_York"), false);
   });
 
   it("uses Eastern days at the window edge", () => {
     const now = new Date("2026-10-11T15:00:00Z");
     // 03:30 UTC Oct 5 is still Oct 4 in Eastern → outside the window.
-    assert.equal(isWithinSweepWindow("2026-10-05T03:30:00Z", now), false);
+    assert.equal(isWithinSweepWindow("2026-10-05T03:30:00Z", now, "America/New_York"), false);
     // 04:30 UTC Oct 5 is 00:30 EDT Oct 5 → inside.
-    assert.equal(isWithinSweepWindow("2026-10-05T04:30:00Z", now), true);
+    assert.equal(isWithinSweepWindow("2026-10-05T04:30:00Z", now, "America/New_York"), true);
+  });
+
+  it("follows the school's own zone", () => {
+    // 05:30 UTC Oct 5 is Oct 5 in Eastern but Oct 4 (22:30) in Pacific.
+    const now = new Date("2026-10-11T20:00:00Z");
+    assert.equal(isWithinSweepWindow("2026-10-05T05:30:00Z", now, "America/New_York"), true);
+    assert.equal(isWithinSweepWindow("2026-10-05T05:30:00Z", now, "America/Los_Angeles"), false);
   });
 
   it("is false when there is no grade", () => {
-    assert.equal(isWithinSweepWindow(null, new Date()), false);
+    assert.equal(isWithinSweepWindow(null, new Date(), "America/New_York"), false);
   });
 });

@@ -49,6 +49,7 @@ function isTime(value: string) {
 
 async function statusFromArrival(
   supabase: Awaited<ReturnType<typeof createClient>>,
+  schoolId: string,
   studentId: string,
   date: string,
   arrivedAt: string,
@@ -56,9 +57,9 @@ async function statusFromArrival(
   const [{ data: student, error: studentError }, { data: settings, error: settingsError }, groups, calendar] =
     await Promise.all([
       supabase.from("students").select("schedule_group_id").eq("id", studentId).single(),
-      supabase.from("settings").select("school_start, tardy_window_hours").eq("id", 1).single(),
-      getScheduleGroups(),
-      getSchoolCalendar(),
+      supabase.from("settings").select("school_start, tardy_window_hours").eq("school_id", schoolId).single(),
+      getScheduleGroups(schoolId),
+      getSchoolCalendar(schoolId),
     ]);
   if (studentError) return { error: studentError.message };
   if (settingsError) return { error: settingsError.message };
@@ -91,7 +92,7 @@ export async function markAttendance(
   if (!status) return { error: "Choose an attendance status." };
 
   if (arrivedNow) {
-    const clock = schoolClock(new Date());
+    const clock = schoolClock(new Date(), profile.timeZone);
     if (clock.date !== date) {
       return { error: "“Arrived now” only works for today. Enter the arrival time instead." };
     }
@@ -107,7 +108,7 @@ export async function markAttendance(
     if (!arrivedAt) {
       return { error: "Enter an arrival time, or pick a status instead of “From arrival time”." };
     }
-    const resolved = await statusFromArrival(supabase, studentId, date, arrivedAt);
+    const resolved = await statusFromArrival(supabase, profile.schoolId, studentId, date, arrivedAt);
     if (typeof resolved !== "string") return resolved;
     status = resolved;
   }

@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { MessageSquare } from "lucide-react";
 
 import { AppShell } from "@/components/controlpad/app-shell";
@@ -13,7 +14,8 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { requireRole } from "@/lib/auth/current-profile";
-import { getSmsConfig, maskPhone, type SmsMode } from "@/lib/sms/send-sms";
+import { loadSchoolSmsConfig } from "@/lib/sms/school-sms-config";
+import { maskPhone, type SmsMode } from "@/lib/sms/send-sms";
 import { createClient } from "@/lib/supabase/server";
 
 import { SimulateInboundForm } from "./simulate-inbound-form";
@@ -92,7 +94,7 @@ const modeDisplay: Record<SmsMode, { label: string; tone: StatusTone; descriptio
     label: "Texting off",
     tone: "warning",
     description:
-      "Alerts are still generated and logged below, but no texts are sent. Once a Twilio number is set up (docs/SETUP.md), add its keys in Vercel to turn texting on.",
+      "Alerts are still generated and logged below, but no texts are sent. Connect your school's Twilio number in Settings → Texting to turn texting on.",
   },
   test: {
     label: "Test mode",
@@ -112,9 +114,9 @@ function studentLabel(row: NotificationRow) {
   return student ? `${student.first_name} ${student.last_name}` : "—";
 }
 
-function formatTimestamp(value: string) {
+function formatTimestamp(value: string, timeZone: string) {
   return new Date(value).toLocaleString("en-US", {
-    timeZone: "America/New_York",
+    timeZone,
     month: "short",
     day: "numeric",
     hour: "numeric",
@@ -124,7 +126,7 @@ function formatTimestamp(value: string) {
 
 export default async function MessagesPage() {
   const profile = await requireRole(["admin"]);
-  const config = getSmsConfig();
+  const config = await loadSchoolSmsConfig(profile.schoolId);
   const mode = modeDisplay[config.mode];
 
   const supabase = await createClient();
@@ -133,6 +135,7 @@ export default async function MessagesPage() {
     .select(
       "id, recipient_phone, recipient_type, trigger_type, body, status, error, created_at, students(first_name, last_name)",
     )
+    .eq("school_id", profile.schoolId)
     .order("created_at", { ascending: false })
     .limit(MESSAGE_LIMIT);
 
@@ -142,12 +145,17 @@ export default async function MessagesPage() {
   const { data: inboundData, error: inboundError } = await supabase
     .from("inbound_messages")
     .select("id, from_phone, body, outcome, simulated, created_at, guardians(full_name)")
+    .eq("school_id", profile.schoolId)
     .order("created_at", { ascending: false })
     .limit(INBOUND_LIMIT);
   const inboundRows = inboundError ? [] : ((inboundData ?? []) as InboundRow[]);
 
   return (
-    <AppShell fullName={profile.fullName} role={profile.role}>
+    <AppShell
+      fullName={profile.fullName}
+      role={profile.role}
+      schoolName={profile.schoolName}
+    >
       <div className="mx-auto max-w-6xl space-y-6">
         <PageHeader
           title="Messages"
@@ -167,7 +175,12 @@ export default async function MessagesPage() {
           <CardContent className="grid gap-2 text-sm text-muted-foreground sm:grid-cols-3">
             <p>
               <span className="font-medium text-foreground">Reason: </span>
-              {config.reason}
+              {config.reason}{" "}
+              {config.mode === "off" ? (
+                <Link href="/settings#texting" className="underline">
+                  Set up texting
+                </Link>
+              ) : null}
             </p>
             <p>
               <span className="font-medium text-foreground">Sending number: </span>
@@ -199,7 +212,7 @@ export default async function MessagesPage() {
                   {
                     key: "when",
                     header: "When",
-                    cell: (row) => formatTimestamp(row.created_at),
+                    cell: (row) => formatTimestamp(row.created_at, profile.timeZone),
                     className: "whitespace-nowrap text-muted-foreground",
                   },
                   {
@@ -259,7 +272,7 @@ export default async function MessagesPage() {
               {
                 key: "when",
                 header: "When",
-                cell: (row) => formatTimestamp(row.created_at),
+                cell: (row) => formatTimestamp(row.created_at, profile.timeZone),
                 className: "whitespace-nowrap text-muted-foreground",
               },
               {

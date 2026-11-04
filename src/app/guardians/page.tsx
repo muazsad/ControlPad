@@ -25,7 +25,11 @@ export default async function GuardiansPage() {
   const guardians = (data ?? []) as Guardian[];
 
   return (
-    <AppShell fullName={profile.fullName} role={profile.role}>
+    <AppShell
+      fullName={profile.fullName}
+      role={profile.role}
+      schoolName={profile.schoolName}
+    >
       <div className="mx-auto max-w-6xl space-y-6">
         <PageHeader
           title="Guardians"

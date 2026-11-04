@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 
 import { handleInboundSms } from "@/lib/absence-reports/inbound";
-import { requireRole } from "@/lib/auth/current-profile";
+import { requireRole, schoolContextOf } from "@/lib/auth/current-profile";
 import { toE164 } from "@/lib/people/people";
 import { maskPhone, sendSms } from "@/lib/sms/send-sms";
 import { createClient } from "@/lib/supabase/server";
@@ -31,6 +31,7 @@ export async function sendTestText(): Promise<TestTextState> {
   }
 
   const result = await sendSms({
+    schoolId: profile.schoolId,
     recipientPhone: phone,
     recipientType: "admin",
     studentId: null,
@@ -75,7 +76,7 @@ export async function simulateInboundText(
   _prev: SimulateInboundState,
   form: FormData,
 ): Promise<SimulateInboundState> {
-  await requireRole(["admin"]);
+  const profile = await requireRole(["admin"]);
 
   const from = toE164((form.get("from") as string | null) ?? "");
   const body = ((form.get("body") as string | null) ?? "").trim();
@@ -86,7 +87,7 @@ export async function simulateInboundText(
   }
 
   try {
-    const result = await handleInboundSms({ from, body, twilioSid: null, simulated: true });
+    const result = await handleInboundSms(schoolContextOf(profile), { from, body, twilioSid: null, simulated: true });
     revalidatePath("/messages");
     revalidatePath("/attendance");
     revalidatePath("/");

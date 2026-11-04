@@ -5,6 +5,14 @@ import type { SendSmsInput, SmsResult } from "@/lib/sms/send-sms";
 
 import { handleInboundSms, type InboundDatabase } from "./inbound";
 import type { InboundChild, PendingFollowUp } from "./parse";
+import type { SchoolContext } from "@/lib/schools/school-context";
+
+const TEST_SCHOOL: SchoolContext = {
+  schoolId: "school-1",
+  name: "Test School",
+  smsName: "Test School",
+  timeZone: "America/New_York",
+};
 
 // 2026-10-12 09:00 Eastern (EDT = UTC-4).
 const morning = new Date("2026-10-12T13:00:00.000Z");
@@ -68,7 +76,7 @@ describe("handleInboundSms", () => {
   it("records a report for an only child and acknowledges the parent", async () => {
     const db = fakeDatabase({ guardians: [guardian], children: [amina] });
     const sms = recorder();
-    const result = await handleInboundSms(
+    const result = await handleInboundSms(TEST_SCHOOL, 
       { from: "(413) 555-0101", body: "Amina is sick today", twilioSid: "SM1", now: morning },
       { database: db.database, sendSms: sms.sendSms },
     );
@@ -92,7 +100,7 @@ describe("handleInboundSms", () => {
   it("asks which child, then completes the report from the reply", async () => {
     const first = fakeDatabase({ guardians: [guardian], children: [amina, yusuf] });
     const sms = recorder();
-    const asked = await handleInboundSms(
+    const asked = await handleInboundSms(TEST_SCHOOL, 
       { from: "+14135550101", body: "sick today", twilioSid: "SM1", now: morning },
       { database: first.database, sendSms: sms.sendSms },
     );
@@ -105,7 +113,7 @@ describe("handleInboundSms", () => {
       children: [amina, yusuf],
       followUp: { id: "in1", date: "2026-10-12", reason: "sick today" },
     });
-    const done = await handleInboundSms(
+    const done = await handleInboundSms(TEST_SCHOOL, 
       { from: "+14135550101", body: "Yusuf", twilioSid: "SM2", now: morning },
       { database: second.database, sendSms: sms.sendSms },
     );
@@ -118,7 +126,7 @@ describe("handleInboundSms", () => {
   it("forwards other texts to the admin with the parent's name", async () => {
     const db = fakeDatabase({ guardians: [guardian], children: [amina] });
     const sms = recorder();
-    const result = await handleInboundSms(
+    const result = await handleInboundSms(TEST_SCHOOL, 
       { from: "+14135550101", body: "Running late, there by 9", twilioSid: "SM1", now: morning },
       { database: db.database, sendSms: sms.sendSms },
     );
@@ -132,7 +140,7 @@ describe("handleInboundSms", () => {
   it("forwards texts from unknown numbers", async () => {
     const db = fakeDatabase({});
     const sms = recorder();
-    const result = await handleInboundSms(
+    const result = await handleInboundSms(TEST_SCHOOL, 
       { from: "+14135550199", body: "Is school open?", twilioSid: "SM1", now: morning },
       { database: db.database, sendSms: sms.sendSms },
     );
@@ -143,7 +151,7 @@ describe("handleInboundSms", () => {
   it("logs STOP without replying", async () => {
     const db = fakeDatabase({ guardians: [guardian], children: [amina] });
     const sms = recorder();
-    const result = await handleInboundSms(
+    const result = await handleInboundSms(TEST_SCHOOL, 
       { from: "+14135550101", body: "STOP", twilioSid: "SM1", now: morning },
       { database: db.database, sendSms: sms.sendSms },
     );
@@ -155,7 +163,7 @@ describe("handleInboundSms", () => {
   it("ignores a Twilio retry of the same message", async () => {
     const db = fakeDatabase({ guardians: [guardian], children: [amina], existingSid: "SM1" });
     const sms = recorder();
-    const result = await handleInboundSms(
+    const result = await handleInboundSms(TEST_SCHOOL, 
       { from: "+14135550101", body: "Amina sick", twilioSid: "SM1", now: morning },
       { database: db.database, sendSms: sms.sendSms },
     );

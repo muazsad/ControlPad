@@ -14,7 +14,7 @@ function calendar(partial: Partial<SchoolCalendarConfig> = {}): SchoolCalendarCo
 
 // Default week: Mon–Thu + Sat. Oct 5 2026 is a Monday.
 const isExpected = expectedDayPredicate(null, calendar(), defaults);
-const base = { thresholdSchoolDays: 5, isExpectedDay: isExpected };
+const base = { thresholdSchoolDays: 5, isExpectedDay: isExpected, timeZone: "America/New_York" };
 
 describe("schoolDaysBetween", () => {
   it("counts expected days after `from` through `to`", () => {

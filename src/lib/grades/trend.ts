@@ -1,4 +1,4 @@
-import { easternDateKey } from "@/lib/grades/sweep";
+import { schoolDateKey } from "@/lib/grades/sweep";
 
 // Pure grade-trend logic: how far has a course's grade moved over a recent
 // window? This is a view (ranking / sparkline), not an alert.
@@ -68,13 +68,14 @@ function roundTenth(value: number): number {
 export function gradeTrend(
   snapshots: TrendSnapshot[],
   today: string,
+  timeZone: string,
   windowDays: number = TREND_WINDOW_DAYS,
 ): GradeTrend | null {
   const dated = snapshots
     .map((snapshot) => ({
       grade: snapshot.grade,
       at: snapshot.recordedAt,
-      date: easternDateKey(new Date(snapshot.recordedAt)),
+      date: schoolDateKey(new Date(snapshot.recordedAt), timeZone),
     }))
     .filter((snapshot) => snapshot.date <= today)
     .sort((a, b) => a.at.localeCompare(b.at));

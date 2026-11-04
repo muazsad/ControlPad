@@ -34,7 +34,7 @@ import { GradeForm } from "@/app/grades/grade-form";
 import { PaceBar } from "@/components/controlpad/pace-bar";
 import { paceForCourse } from "@/lib/grades/pace";
 import { loadPaceContext } from "@/lib/grades/pace-data";
-import { easternDateKey } from "@/lib/grades/sweep";
+import { schoolDateKey } from "@/lib/grades/sweep";
 import {
   StudentGuardianLinks,
   type LinkedGuardian,
@@ -173,7 +173,7 @@ export default async function StudentDetailPage({
         referencedTable: "grades",
         ascending: false,
       }),
-    supabase.from("settings").select("grade_floor").eq("id", 1).single(),
+    supabase.from("settings").select("grade_floor").eq("school_id", profile.schoolId).single(),
     supabase
       .from("quran_progress")
       .select("date, lines_memorized")
@@ -186,9 +186,9 @@ export default async function StudentDetailPage({
       .select("status")
       .eq("student_id", id)
       .gte("date", cutoff),
-    loadPaceContext(),
+    loadPaceContext(profile.schoolId),
   ]);
-  const today = easternDateKey(new Date());
+  const today = schoolDateKey(new Date(), profile.timeZone);
 
   const linked: LinkedGuardian[] = (links ?? []).map((row) => {
     const g = row.guardians as unknown as Guardian;
@@ -235,7 +235,11 @@ export default async function StudentDetailPage({
   }
 
   return (
-    <AppShell fullName={profile.fullName} role={profile.role}>
+    <AppShell
+      fullName={profile.fullName}
+      role={profile.role}
+      schoolName={profile.schoolName}
+    >
       <div className="mx-auto max-w-4xl space-y-6">
         <Button asChild variant="ghost" size="sm" className="-ml-2 w-fit">
           <Link href="/students">

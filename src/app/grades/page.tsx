@@ -13,7 +13,7 @@ import { formatGrade, gradeTone } from "./grade-display";
 import { studentGradeHealth } from "@/lib/grades/grade-health";
 import { paceForCourse, worstTone } from "@/lib/grades/pace";
 import { loadPaceContext } from "@/lib/grades/pace-data";
-import { easternDateKey } from "@/lib/grades/sweep";
+import { schoolDateKey } from "@/lib/grades/sweep";
 import { TREND_WINDOW_DAYS, trendTone } from "@/lib/grades/trend";
 import { getAllStudentMetrics } from "@/lib/people/student-metrics";
 import { createClient } from "@/lib/supabase/server";
@@ -32,11 +32,11 @@ export default async function GradesPage({
   // Pace, staleness and trends are staff-only (parents can't read settings).
   const [metrics, { data: settingsData }, paceContext] = await Promise.all([
     getAllStudentMetrics(),
-    supabase.from("settings").select("grade_floor").eq("id", 1).single(),
-    canManage ? loadPaceContext() : Promise.resolve(null),
+    supabase.from("settings").select("grade_floor").eq("school_id", profile.schoolId).single(),
+    canManage ? loadPaceContext(profile.schoolId) : Promise.resolve(null),
   ]);
 
-  const today = easternDateKey(new Date());
+  const today = schoolDateKey(new Date(), profile.timeZone);
   const students = metrics.map((student) => {
     if (!paceContext) {
       return { ...student, paceBehind: 0, paceMissing: 0, paceTone: "neutral" as const, health: null };
@@ -83,7 +83,11 @@ export default async function GradesPage({
     settingsData?.grade_floor == null ? null : Number(settingsData.grade_floor);
 
   return (
-    <AppShell fullName={profile.fullName} role={profile.role}>
+    <AppShell
+      fullName={profile.fullName}
+      role={profile.role}
+      schoolName={profile.schoolName}
+    >
       <div className="mx-auto max-w-6xl space-y-6">
         <PageHeader
           title="Grades"

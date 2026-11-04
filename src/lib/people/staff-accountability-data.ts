@@ -47,20 +47,24 @@ export async function getStaffMembers(supabase?: Client): Promise<StaffMember[]>
   return (data ?? []).map((row) => ({ id: row.id as string, name: row.full_name as string }));
 }
 
-export async function getStaffChecklist(now = new Date()): Promise<{
+export async function getStaffChecklist(
+  schoolId: string,
+  timeZone: string,
+  now = new Date(),
+): Promise<{
   date: string;
   rows: TeacherChecklist[];
   anyTeacherAssigned: boolean;
 }> {
   const supabase = await createClient();
-  const clock = schoolClock(now);
+  const clock = schoolClock(now, timeZone);
   const date = clock.date;
 
   const [settingsResult, groups, calendar, groupTeachers, staff, studentsResult, reportsResult] =
     await Promise.all([
-      supabase.from("settings").select("school_start, tardy_window_hours").eq("id", 1).single(),
-      getScheduleGroups(),
-      getSchoolCalendar(),
+      supabase.from("settings").select("school_start, tardy_window_hours").eq("school_id", schoolId).single(),
+      getScheduleGroups(schoolId),
+      getSchoolCalendar(schoolId),
       getGroupTeachers(supabase),
       getStaffMembers(supabase),
       supabase

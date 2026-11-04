@@ -29,6 +29,7 @@ type AppShellProps = {
   children: ReactNode;
   fullName: string;
   role: AppRole;
+  schoolName: string;
 };
 
 export const roleLabels: Record<AppRole, string> = {
@@ -61,13 +62,13 @@ function navForRole(role: AppRole) {
   return [{ href: "/", label: "My children", icon: Users }];
 }
 
-function Sidebar({ items }: { items: NavItem[] }) {
+function Sidebar({ items, schoolName }: { items: NavItem[]; schoolName: string }) {
   const pathname = usePathname();
 
   return (
     <aside className="hidden min-h-dvh w-64 shrink-0 flex-col bg-sidebar text-sidebar-foreground md:flex">
       <div className="border-b border-sidebar-border px-5 py-5">
-        <BrandMark />
+        <BrandMark schoolName={schoolName} />
       </div>
       <nav className="flex-1 space-y-1 px-3 py-5">
         {items.map((item) => {
@@ -97,12 +98,12 @@ function Sidebar({ items }: { items: NavItem[] }) {
   );
 }
 
-function ParentShell({ children, fullName, role }: AppShellProps) {
+function ParentShell({ children, fullName, role, schoolName }: AppShellProps) {
   return (
     <div className="min-h-dvh bg-background">
       <header className="sticky top-0 z-20 border-b bg-card/95 backdrop-blur">
         <div className="mx-auto flex min-h-16 max-w-5xl items-center justify-between gap-4 px-4 sm:px-6">
-          <BrandMark />
+          <BrandMark schoolName={schoolName} />
           <UserMenu
             fullName={fullName}
             roleLabel={roleLabels[role]}
@@ -116,31 +117,33 @@ function ParentShell({ children, fullName, role }: AppShellProps) {
   );
 }
 
-export function AppShell({ children, fullName, role }: AppShellProps) {
+export function AppShell({ children, fullName, role, schoolName }: AppShellProps) {
   if (role === "parent") {
-    return <ParentShell fullName={fullName} role={role}>{children}</ParentShell>;
+    return (
+      <ParentShell fullName={fullName} role={role} schoolName={schoolName}>
+        {children}
+      </ParentShell>
+    );
   }
 
   const items = navForRole(role);
 
   return (
     <div className="flex min-h-dvh bg-background">
-      <Sidebar items={items} />
+      <Sidebar items={items} schoolName={schoolName} />
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="sticky top-0 z-20 border-b bg-card/95 backdrop-blur">
           <div className="flex min-h-16 items-center justify-between gap-4 px-4 sm:px-6">
             <div className="flex min-w-0 items-center gap-3">
-              <MobileNav items={items} />
+              <MobileNav items={items} schoolName={schoolName} />
               <div className="md:hidden">
-                <BrandMark compact />
+                <BrandMark compact schoolName={schoolName} />
               </div>
               <div className="hidden min-w-0 md:block">
                 <p className="truncate text-sm font-semibold text-primary">
-                  ControlPad
+                  {schoolName}
                 </p>
-                <p className="truncate text-xs text-muted-foreground">
-                  Salaam Institute operations
-                </p>
+                <p className="truncate text-xs text-muted-foreground">ControlPad</p>
               </div>
             </div>
             <div className="flex items-center gap-3">

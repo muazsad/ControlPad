@@ -6,7 +6,6 @@ import {
   announcementBody,
   announcementRecipients,
   audienceLabel,
-  easternToUtc,
   parseAnnouncementForm,
   smsSegments,
   UNGROUPED,
@@ -36,8 +35,8 @@ describe("announcementRecipients", () => {
 
 describe("message helpers", () => {
   it("adds the school prefix once", () => {
-    assert.equal(announcementBody(" No school Monday "), "Salaam Institute: No school Monday");
-    assert.equal(announcementBody("Salaam Institute: hi"), "Salaam Institute: hi");
+    assert.equal(announcementBody(" No school Monday ", "Test School"), "Test School: No school Monday");
+    assert.equal(announcementBody("Test School: hi", "Test School"), "Test School: hi");
   });
 
   it("counts SMS segments", () => {
@@ -54,16 +53,9 @@ describe("message helpers", () => {
   });
 });
 
-describe("easternToUtc", () => {
-  it("handles daylight and standard time", () => {
-    assert.equal(easternToUtc("2026-10-15", "19:00").toISOString(), "2026-10-15T23:00:00.000Z");
-    assert.equal(easternToUtc("2026-12-15", "08:00").toISOString(), "2026-12-15T13:00:00.000Z");
-  });
-});
-
 describe("parseAnnouncementForm", () => {
   const now = new Date("2026-10-12T14:00:00.000Z"); // 10:00 AM EDT, Monday
-  const context = { validGroupKeys: new Set(["full", "quran", UNGROUPED]), now };
+  const context = { validGroupKeys: new Set(["full", "quran", UNGROUPED]), now, timeZone: "America/New_York" };
   const base = { message: "No school Friday", audience: "all", groups: [], when: "now", date: "", time: "" };
 
   it("accepts send-now to all parents", () => {

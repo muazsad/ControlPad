@@ -1,4 +1,5 @@
 import { createServiceClient } from "@/lib/supabase/server";
+import { loadSchoolSmsConfig } from "@/lib/sms/school-sms-config";
 
 export type NotificationTrigger =
   | "low_grade"
@@ -20,6 +21,8 @@ export type NotificationTrigger =
 export type RecipientType = "admin" | "parent";
 
 export type SendSmsInput = {
+  /** The school sending the text; its row goes in that school's log. */
+  schoolId: string;
   recipientPhone: string;
   recipientType: RecipientType;
   studentId: string | null;
@@ -123,6 +126,7 @@ export type SmsResult =
 export type SmsDatabase = {
   /** Matching notifications created since `since`, newest first. */
   findRecentNotifications(input: {
+    schoolId: string;
     recipientPhone: string;
     studentId: string | null;
     triggerType: NotificationTrigger;
@@ -130,6 +134,7 @@ export type SmsDatabase = {
     dedupeKey?: string | null;
   }): Promise<RecentNotification[]>;
   insertNotification(row: {
+    school_id: string;
     recipient_phone: string;
     recipient_type: RecipientType;
     student_id: string | null;
@@ -143,6 +148,7 @@ export type SmsDatabase = {
     sent_at?: string | null;
   }): Promise<unknown>;
   updateNotification(
+    schoolId: string,
     id: string,
     patch: {
       status: "sent" | "failed";
@@ -155,7 +161,8 @@ export type SmsDatabase = {
 
 type SendSmsDeps = {
   database?: SmsDatabase;
-  env?: NodeJS.ProcessEnv | Record<string, string | undefined>;
+  /** The school's effective texting setup (default: its saved Twilio config). */
+  getConfig?: (schoolId: string) => Promise<SmsConfig>;
   fetch?: typeof fetch;
   now?: () => Date;
 };
@@ -172,57 +179,6 @@ function getNotificationId(notification: unknown): string | null {
   return null;
 }
 
-function requiredTwilioEnv(env: NodeJS.ProcessEnv | Record<string, string | undefined>) {
-  const accountSid = env.TWILIO_ACCOUNT_SID;
-  const authToken = env.TWILIO_AUTH_TOKEN;
-  const fromPhone = env.TWILIO_PHONE_NUMBER;
-
-  if (!accountSid || !authToken || !fromPhone) return null;
-
-  return { accountSid, authToken, fromPhone };
-}
-
-/** Reads SMS_MODE / Twilio / SMS_TEST_NUMBER env vars. Never returns secrets to the client. */
-export function getSmsConfig(
-  env: NodeJS.ProcessEnv | Record<string, string | undefined> = process.env,
-): SmsConfig {
-  const twilio = requiredTwilioEnv(env);
-  const testNumber = env.SMS_TEST_NUMBER?.trim() || null;
-  const requested = env.SMS_MODE?.trim().toLowerCase();
-
-  if (requested === "off") {
-    return { mode: "off", reason: "SMS_MODE is off.", twilio, testNumber };
-  }
-  if (!twilio) {
-    return {
-      mode: "off",
-      reason: "Twilio is not configured yet (TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_PHONE_NUMBER).",
-      twilio: null,
-      testNumber,
-    };
-  }
-  if (requested === "test") {
-    if (!testNumber) {
-      return {
-        mode: "off",
-        reason: "SMS_MODE is test but SMS_TEST_NUMBER is not set.",
-        twilio,
-        testNumber: null,
-      };
-    }
-    return { mode: "test", reason: "SMS_MODE is test.", twilio, testNumber };
-  }
-  if (requested && requested !== "live") {
-    return {
-      mode: "off",
-      reason: `Unknown SMS_MODE "${requested}" (use off, test, or live).`,
-      twilio,
-      testNumber,
-    };
-  }
-  return { mode: "live", reason: "Twilio is configured.", twilio, testNumber };
-}
-
 /** "+14135550101" → "•••0101" — avoid showing full numbers in logs/UI. */
 export function maskPhone(phone: string): string {
   const digits = phone.replace(/\D/g, "");
@@ -234,6 +190,7 @@ export function createSupabaseSmsDatabase(): SmsDatabase {
 
   return {
     async findRecentNotifications({
+      schoolId,
       recipientPhone,
       studentId,
       triggerType,
@@ -243,6 +200,7 @@ export function createSupabaseSmsDatabase(): SmsDatabase {
       let query = supabase
         .from("notifications")
         .select("id, status, delivery_mode")
+        .eq("school_id", schoolId)
         .eq("recipient_phone", recipientPhone)
         .gte("created_at", since.toISOString())
         .order("created_at", { ascending: false })
@@ -263,6 +221,7 @@ export function createSupabaseSmsDatabase(): SmsDatabase {
       return (data ?? []) as RecentNotification[];
     },
     async insertNotification(row) {
+      // tenant-scope-ok: row.school_id is required by SmsDatabase.insertNotification
       const { data, error } = await supabase
         .from("notifications")
         .insert(row)
@@ -271,10 +230,11 @@ export function createSupabaseSmsDatabase(): SmsDatabase {
       if (error) throw new Error(error.message);
       return data;
     },
-    async updateNotification(id, patch) {
+    async updateNotification(schoolId, id, patch) {
       const { data, error } = await supabase
         .from("notifications")
         .update(patch)
+        .eq("school_id", schoolId)
         .eq("id", id)
         .select("id, status, twilio_sid, error")
         .single();
@@ -289,14 +249,14 @@ export async function sendSms(
   deps: SendSmsDeps = {},
 ): Promise<SmsResult> {
   const database = deps.database ?? createSupabaseSmsDatabase();
-  const env = deps.env ?? process.env;
   const now = deps.now ?? (() => new Date());
   const fetchImpl = deps.fetch ?? fetch;
   const dedupeWindowHours = input.dedupeWindowHours ?? 24 * 7;
   const since = new Date(now().getTime() - dedupeWindowHours * 60 * 60 * 1000);
-  const config = getSmsConfig(env);
+  const config = await (deps.getConfig ?? loadSchoolSmsConfig)(input.schoolId);
 
   const recent = await database.findRecentNotifications({
+    schoolId: input.schoolId,
     recipientPhone: input.recipientPhone,
     studentId: input.studentId,
     triggerType: input.triggerType,
@@ -319,6 +279,7 @@ export async function sendSms(
   const twilioEnv = config.mode === "off" ? null : config.twilio;
 
   const notification = await database.insertNotification({
+    school_id: input.schoolId,
     recipient_phone: input.recipientPhone,
     recipient_type: input.recipientType,
     student_id: input.studentId,
@@ -372,7 +333,7 @@ export async function sendSms(
       const message =
         payload.message ?? `Twilio request failed with ${response.status}`;
       if (notificationId) {
-        const updated = await database.updateNotification(notificationId, {
+        const updated = await database.updateNotification(input.schoolId, notificationId, {
           status: "failed",
           error: message,
         });
@@ -382,7 +343,7 @@ export async function sendSms(
     }
 
     if (notificationId) {
-      const updated = await database.updateNotification(notificationId, {
+      const updated = await database.updateNotification(input.schoolId, notificationId, {
         status: "sent",
         twilio_sid: payload.sid ?? null,
         error: null,
@@ -395,7 +356,7 @@ export async function sendSms(
   } catch (error) {
     const message = error instanceof Error ? error.message : "SMS send failed.";
     if (notificationId) {
-      const updated = await database.updateNotification(notificationId, {
+      const updated = await database.updateNotification(input.schoolId, notificationId, {
         status: "failed",
         error: message,
       });

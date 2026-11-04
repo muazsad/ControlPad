@@ -196,6 +196,7 @@ export function acknowledgementMessage(
   children: InboundChild[],
   date: string,
   today: string,
+  smsName: string,
 ): string {
   const names = joinNames(children.map((child) => child.firstName));
   const when =
@@ -204,12 +205,12 @@ export function acknowledgementMessage(
       : date === addDays(today, 1)
         ? `tomorrow (${friendlyDate(date)})`
         : `on ${friendlyDate(date)}`;
-  return `Salaam Institute: Thank you — we've noted that ${names} will be absent ${when}. The school will review it.`;
+  return `${smsName}: Thank you — we've noted that ${names} will be absent ${when}. The school will review it.`;
 }
 
-export function askWhichChildMessage(children: InboundChild[]): string {
+export function askWhichChildMessage(children: InboundChild[], smsName: string): string {
   const names = children.map((child) => child.firstName).join(", ");
-  return `Salaam Institute: Thank you for letting us know. Which child will be absent? Reply with a name (${names}) or ALL.`;
+  return `${smsName}: Thank you for letting us know. Which child will be absent? Reply with a name (${names}) or ALL.`;
 }
 
 export function forwardToAdminMessage(input: {

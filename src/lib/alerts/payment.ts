@@ -1,5 +1,6 @@
 import { createServiceClient } from "@/lib/supabase/server";
 import { sendSms, type SendSmsInput, type SmsResult } from "@/lib/sms/send-sms";
+import type { SchoolContext } from "@/lib/schools/school-context";
 
 type GuardianRecipient = {
   full_name: string;
@@ -42,7 +43,7 @@ function studentName(s: Pick<OverdueStudent, "first_name" | "last_name">) {
   return `${s.first_name} ${s.last_name}`.trim();
 }
 
-export function createSupabasePaymentAlertDatabase(): PaymentAlertDatabase {
+export function createSupabasePaymentAlertDatabase(ctx: SchoolContext): PaymentAlertDatabase {
   const supabase = createServiceClient();
 
   return {
@@ -50,7 +51,7 @@ export function createSupabasePaymentAlertDatabase(): PaymentAlertDatabase {
       const { data, error } = await supabase
         .from("settings")
         .select("payment_due_day")
-        .eq("id", 1)
+        .eq("school_id", ctx.schoolId)
         .single();
       if (error) throw new Error(error.message);
       return { paymentDueDayOfMonth: Number(data.payment_due_day) };
@@ -60,6 +61,7 @@ export function createSupabasePaymentAlertDatabase(): PaymentAlertDatabase {
       const { data, error } = await supabase
         .from("profiles")
         .select("full_name, phone")
+        .eq("school_id", ctx.schoolId)
         .eq("role", "admin")
         .not("phone", "is", null);
       if (error) throw new Error(error.message);
@@ -71,6 +73,7 @@ export function createSupabasePaymentAlertDatabase(): PaymentAlertDatabase {
       const { data: allStudents, error: studentsError } = await supabase
         .from("students")
         .select("id, first_name, last_name")
+        .eq("school_id", ctx.schoolId)
         .eq("enrollment_status", "active");
       if (studentsError) throw new Error(studentsError.message);
 
@@ -83,6 +86,7 @@ export function createSupabasePaymentAlertDatabase(): PaymentAlertDatabase {
       const { data: paidRows, error: paymentsError } = await supabase
         .from("payments")
         .select("student_id")
+        .eq("school_id", ctx.schoolId)
         .in("student_id", studentIds)
         .eq("period_month", periodMonth)
         .eq("status", "paid");
@@ -99,6 +103,7 @@ export function createSupabasePaymentAlertDatabase(): PaymentAlertDatabase {
       const { data: guardianLinks, error: guardianError } = await supabase
         .from("student_guardians")
         .select("student_id, guardians(full_name, phone)")
+        .eq("school_id", ctx.schoolId)
         .in("student_id", overdueIds);
       if (guardianError) throw new Error(guardianError.message);
 
@@ -139,10 +144,11 @@ export function createSupabasePaymentAlertDatabase(): PaymentAlertDatabase {
 }
 
 export async function checkPaymentOverdueAlerts(
+  ctx: SchoolContext,
   asOfDate: string,
   deps: AlertDeps = {},
 ): Promise<AlertResult> {
-  const database = deps.database ?? createSupabasePaymentAlertDatabase();
+  const database = deps.database ?? createSupabasePaymentAlertDatabase(ctx);
   const send = deps.sendSms ?? sendSms;
 
   const settings = await database.getPaymentSettings();
@@ -171,11 +177,12 @@ export async function checkPaymentOverdueAlerts(
 
   for (const student of overdueStudents) {
     const name = studentName(student);
-    const parentBody = `Salaam Institute: ${name}'s tuition for ${monthDisplay} has not been received. Please contact the school.`;
+    const parentBody = `${ctx.smsName}: ${name}'s tuition for ${monthDisplay} has not been received. Please contact the school.`;
     const adminBody = `ControlPad: ${name}'s tuition for ${monthDisplay} is overdue (due day: ${settings.paymentDueDayOfMonth}).`;
 
     for (const guardian of student.guardians) {
       messages.push({
+        schoolId: ctx.schoolId,
         recipientPhone: guardian.phone,
         recipientType: "parent",
         studentId: student.id,
@@ -188,6 +195,7 @@ export async function checkPaymentOverdueAlerts(
     for (const admin of admins) {
       if (!admin.phone) continue;
       messages.push({
+        schoolId: ctx.schoolId,
         recipientPhone: admin.phone,
         recipientType: "admin",
         studentId: student.id,

@@ -21,23 +21,26 @@ import { createClient, createServiceClient } from "@/lib/supabase/server";
  * session; pages use the signed-in client (RLS applies).
  */
 export async function loadPaceContext(
+  schoolId: string,
   options: { service?: boolean } = {},
 ): Promise<PaceContext> {
   const supabase = options.service ? createServiceClient() : await createClient();
 
-  const [settingsResult, calendar, groups] = await Promise.all([
+  const [settingsResult, schoolResult, calendar, groups] = await Promise.all([
     supabase
       .from("settings")
       .select(
         "term_start, term_end, pace_gap_threshold, missing_assignments_threshold, stale_grade_school_days, school_start, tardy_window_hours",
       )
-      .eq("id", 1)
+      .eq("school_id", schoolId)
       .single(),
-    options.service ? getServiceSchoolCalendar() : getSchoolCalendar(),
-    options.service ? getServiceScheduleGroups() : getScheduleGroups(),
+    supabase.from("schools").select("time_zone").eq("id", schoolId).single(),
+    options.service ? getServiceSchoolCalendar(schoolId) : getSchoolCalendar(schoolId),
+    options.service ? getServiceScheduleGroups(schoolId) : getScheduleGroups(schoolId),
   ]);
 
   if (settingsResult.error) throw new Error(settingsResult.error.message);
+  if (schoolResult.error) throw new Error(schoolResult.error.message);
   const row = settingsResult.data;
 
   return {
@@ -58,5 +61,6 @@ export async function loadPaceContext(
       schoolStart: String(row.school_start).slice(0, 5),
       tardyWindowHours: Number(row.tardy_window_hours),
     },
+    timeZone: String(schoolResult.data.time_zone),
   };
 }

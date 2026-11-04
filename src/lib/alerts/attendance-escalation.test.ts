@@ -16,6 +16,14 @@ import {
   type EscalationDatabase,
   type EscalationStudent,
 } from "./attendance-escalation";
+import type { SchoolContext } from "@/lib/schools/school-context";
+
+const TEST_SCHOOL: SchoolContext = {
+  schoolId: "school-1",
+  name: "Test School",
+  smsName: "Test School",
+  timeZone: "America/New_York",
+};
 
 const calendar: SchoolCalendarConfig = {
   weeklyPattern: DEFAULT_WEEKLY_PATTERN,
@@ -210,15 +218,15 @@ describe("planAttendanceEscalation", () => {
 
 describe("schoolClock", () => {
   it("reads Eastern date and minutes, including across DST", () => {
-    assert.deepEqual(schoolClock(new Date("2026-10-12T14:05:00Z")), {
+    assert.deepEqual(schoolClock(new Date("2026-10-12T14:05:00Z"), "America/New_York"), {
       date: "2026-10-12",
       minutes: at("10:05"),
     });
-    assert.deepEqual(schoolClock(new Date("2026-12-14T15:05:00Z")), {
+    assert.deepEqual(schoolClock(new Date("2026-12-14T15:05:00Z"), "America/New_York"), {
       date: "2026-12-14",
       minutes: at("10:05"),
     });
-    assert.deepEqual(schoolClock(new Date("2026-10-13T03:30:00Z")), {
+    assert.deepEqual(schoolClock(new Date("2026-10-13T03:30:00Z"), "America/New_York"), {
       date: "2026-10-12",
       minutes: at("23:30"),
     });
@@ -226,8 +234,14 @@ describe("schoolClock", () => {
 
   it("treats past dates as fully elapsed and future dates as not started", () => {
     const now = new Date("2026-10-12T14:05:00Z");
-    assert.equal(minutesIntoDate("2026-10-11", now), 24 * 60);
-    assert.equal(minutesIntoDate("2026-10-13", now), -1);
+    assert.equal(minutesIntoDate("2026-10-11", now, "America/New_York"), 24 * 60);
+    assert.equal(minutesIntoDate("2026-10-13", now, "America/New_York"), -1);
+  });
+
+  it("follows the school's own zone", () => {
+    const now = new Date("2026-11-03T15:00:00.000Z");
+    assert.equal(schoolClock(now, "America/New_York").minutes, at("10:00"));
+    assert.equal(schoolClock(now, "America/Los_Angeles").minutes, at("07:00"));
   });
 });
 
@@ -294,7 +308,7 @@ describe("runAttendanceTick", () => {
     };
 
     // 10:05 EDT
-    const early = await runAttendanceTick(
+    const early = await runAttendanceTick(TEST_SCHOOL, 
       { now: new Date("2026-10-12T14:05:00Z") },
       deps,
     );
@@ -311,7 +325,7 @@ describe("runAttendanceTick", () => {
 
     sent.length = 0;
     // 11:00 EDT — admin batch re-sent (deduped by sendSms) + two parent texts
-    const later = await runAttendanceTick(
+    const later = await runAttendanceTick(TEST_SCHOOL, 
       { now: new Date("2026-10-12T15:00:00Z") },
       deps,
     );
@@ -347,11 +361,11 @@ describe("runAttendanceTick", () => {
     };
 
     // 2:55pm EST in December (19:55 UTC) — too early
-    await runAttendanceTick({ now: new Date("2026-12-14T19:55:00Z") }, deps);
+    await runAttendanceTick(TEST_SCHOOL, { now: new Date("2026-12-14T19:55:00Z") }, deps);
     // 3:05pm EST
-    const result = await runAttendanceTick({ now: new Date("2026-12-14T20:05:00Z") }, deps);
+    const result = await runAttendanceTick(TEST_SCHOOL, { now: new Date("2026-12-14T20:05:00Z") }, deps);
     // 4:10pm EST — outside the window
-    await runAttendanceTick({ now: new Date("2026-12-14T21:10:00Z") }, deps);
+    await runAttendanceTick(TEST_SCHOOL, { now: new Date("2026-12-14T21:10:00Z") }, deps);
 
     assert.deepEqual(digestCalls, ["2026-12-14"]);
     assert.deepEqual(result.digest, { ran: true, sent: true, skippedReason: null });
@@ -370,10 +384,10 @@ describe("runAttendanceTick", () => {
       sendDigest: async () => ({ sent: false }),
     };
     // 11:05 EDT (UTC-4) and 11:05 EST (UTC-5)
-    await runAttendanceTick({ now: new Date("2026-10-12T15:05:00Z") }, deps);
-    await runAttendanceTick({ now: new Date("2026-12-14T16:05:00Z") }, deps);
+    await runAttendanceTick(TEST_SCHOOL, { now: new Date("2026-10-12T15:05:00Z") }, deps);
+    await runAttendanceTick(TEST_SCHOOL, { now: new Date("2026-12-14T16:05:00Z") }, deps);
     // 10:05 EST — too early
-    await runAttendanceTick({ now: new Date("2026-12-15T15:05:00Z") }, deps);
+    await runAttendanceTick(TEST_SCHOOL, { now: new Date("2026-12-15T15:05:00Z") }, deps);
     assert.deepEqual(calls, ["2026-10-12", "2026-12-14"]);
   });
 
@@ -406,9 +420,9 @@ describe("runAttendanceTick", () => {
       },
     };
     // 5:50pm EDT — too early
-    await runAttendanceTick({ now: new Date("2026-10-12T21:50:00Z") }, deps);
+    await runAttendanceTick(TEST_SCHOOL, { now: new Date("2026-10-12T21:50:00Z") }, deps);
     // 6:00pm EDT
-    const result = await runAttendanceTick({ now: new Date("2026-10-12T22:00:00Z") }, deps);
+    const result = await runAttendanceTick(TEST_SCHOOL, { now: new Date("2026-10-12T22:00:00Z") }, deps);
     assert.deepEqual(notices, ["2026-10-13"]);
     assert.deepEqual(result.specialDayNotice, { date: "2026-10-13", recipients: 3 });
   });

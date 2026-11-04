@@ -18,11 +18,14 @@ import {
   getStaffMembers,
 } from "@/lib/people/staff-accountability-data";
 import { getScheduleGroups } from "@/lib/schedule/schedule-groups-data";
+import { loadTextingView } from "@/lib/sms/texting-view";
 import { createClient } from "@/lib/supabase/server";
 
 import { ScheduleForm } from "./schedule-form";
 import { ScheduleGroupsForm } from "./schedule-groups-form";
+import { SchoolForm } from "./school-form";
 import { SettingsForm } from "./settings-form";
+import { TextingForm } from "./texting-form";
 import type { SettingsValues } from "./settings-validation";
 
 type SettingsRow = SettingsValues & {
@@ -58,7 +61,7 @@ export default async function SettingsPage() {
     .select(
       "grade_floor, tardy_window_hours, tardies_per_week, quran_inactivity_days, payment_due_day, school_start, admin_digest_time, parent_alert_delay_minutes, term_start, term_end, pace_gap_threshold, missing_assignments_threshold, stale_grade_school_days, revision_overdue_school_days, updated_at",
     )
-    .eq("id", 1)
+    .eq("school_id", profile.schoolId)
     .single();
 
   const settings = data as SettingsRow | null;
@@ -75,14 +78,14 @@ export default async function SettingsPage() {
     supabase
       .from("school_weekly_patterns")
       .select("sunday, monday, tuesday, wednesday, thursday, friday, saturday, updated_at")
-      .eq("id", 1)
+      .eq("school_id", profile.schoolId)
       .maybeSingle(),
     supabase
       .from("school_breaks")
       .select("id, name, start_date, end_date")
       .order("start_date", { ascending: true }),
-    loadSpecialDayRows(supabase),
-    getScheduleGroups(),
+    loadSpecialDayRows(supabase, profile.schoolId),
+    getScheduleGroups(profile.schoolId),
     supabase
       .from("students")
       .select("schedule_group_id, student_guardians(guardians(phone))")
@@ -129,7 +132,11 @@ export default async function SettingsPage() {
   }
 
   return (
-    <AppShell fullName={profile.fullName} role={profile.role}>
+    <AppShell
+      fullName={profile.fullName}
+      role={profile.role}
+      schoolName={profile.schoolName}
+    >
       <div className="mx-auto max-w-7xl space-y-6">
         <PageHeader
           title="Settings"
@@ -147,6 +154,12 @@ export default async function SettingsPage() {
           />
         ) : (
           <div className="space-y-8">
+            <SchoolForm
+              name={profile.schoolName}
+              smsName={profile.smsName}
+              timeZone={profile.timeZone}
+            />
+            <TextingForm view={await loadTextingView(profile.schoolId)} />
             <SettingsForm settings={settings} />
             <ScheduleGroupsForm
               groups={scheduleGroups}
@@ -161,6 +174,8 @@ export default async function SettingsPage() {
               specialDays={specialDays}
               groups={scheduleGroups.map((group) => ({ id: group.id, name: group.name }))}
               recipientCounts={recipientCounts}
+              smsName={profile.smsName}
+              timeZone={profile.timeZone}
             />
           </div>
         )}
