@@ -5,7 +5,7 @@ import {
   type PaceContext,
 } from "@/lib/grades/pace";
 import { loadPaceContext } from "@/lib/grades/pace-data";
-import { easternDateKey } from "@/lib/grades/sweep";
+import { schoolDateKey } from "@/lib/grades/sweep";
 import { sendSms, type SendSmsInput, type SmsResult } from "@/lib/sms/send-sms";
 import { createServiceClient } from "@/lib/supabase/server";
 import type { SchoolContext } from "@/lib/schools/school-context";
@@ -114,7 +114,7 @@ export async function checkPaceAlerts(
 ): Promise<PaceAlertResult> {
   const send = deps.sendSms ?? sendSms;
   const context = deps.context ?? (await loadPaceContext(ctx.schoolId, { service: true }));
-  const today = easternDateKey(deps.now ?? new Date());
+  const today = schoolDateKey(deps.now ?? new Date(), ctx.timeZone);
   const week = isoWeekKey(today);
 
   const evaluation = paceForCourse(

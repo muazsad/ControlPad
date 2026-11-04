@@ -106,7 +106,7 @@ export async function handleInboundSms(
         )
       : null;
 
-  const clock = schoolClock(now);
+  const clock = schoolClock(now, ctx.timeZone);
   const plan = planInboundSms({
     body,
     knownSender: guardians.length > 0,

@@ -92,7 +92,7 @@ export async function markAttendance(
   if (!status) return { error: "Choose an attendance status." };
 
   if (arrivedNow) {
-    const clock = schoolClock(new Date());
+    const clock = schoolClock(new Date(), profile.timeZone);
     if (clock.date !== date) {
       return { error: "“Arrived now” only works for today. Enter the arrival time instead." };
     }

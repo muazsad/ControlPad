@@ -890,14 +890,14 @@ export default async function HomePage() {
       .order("last_name", { ascending: true });
     children = (data ?? []) as Student[];
   } else if (profile.role === "admin") {
-    const today = todayInSchoolTimeZone();
+    const today = todayInSchoolTimeZone(new Date(), profile.timeZone);
     let pendingReports: Awaited<ReturnType<typeof getPendingAbsenceReports>>;
     [adminDailySummary, adminEscalations, pendingReports, staffChecklist] = await Promise.all([
       getAdminDailySummary(schoolContextOf(profile), today, { now: new Date() }),
       getEscalationStudents(profile.schoolId, today),
       getPendingAbsenceReports(),
       // A checklist failure shouldn't take down the dashboard.
-      getStaffChecklist(profile.schoolId).catch(() => null),
+      getStaffChecklist(profile.schoolId, profile.timeZone).catch(() => null),
     ]);
     pendingAbsenceReports = pendingReports.length;
   }

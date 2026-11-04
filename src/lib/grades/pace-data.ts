@@ -26,7 +26,7 @@ export async function loadPaceContext(
 ): Promise<PaceContext> {
   const supabase = options.service ? createServiceClient() : await createClient();
 
-  const [settingsResult, calendar, groups] = await Promise.all([
+  const [settingsResult, schoolResult, calendar, groups] = await Promise.all([
     supabase
       .from("settings")
       .select(
@@ -34,11 +34,13 @@ export async function loadPaceContext(
       )
       .eq("school_id", schoolId)
       .single(),
+    supabase.from("schools").select("time_zone").eq("id", schoolId).single(),
     options.service ? getServiceSchoolCalendar(schoolId) : getSchoolCalendar(schoolId),
     options.service ? getServiceScheduleGroups(schoolId) : getScheduleGroups(schoolId),
   ]);
 
   if (settingsResult.error) throw new Error(settingsResult.error.message);
+  if (schoolResult.error) throw new Error(schoolResult.error.message);
   const row = settingsResult.data;
 
   return {
@@ -59,5 +61,6 @@ export async function loadPaceContext(
       schoolStart: String(row.school_start).slice(0, 5),
       tardyWindowHours: Number(row.tardy_window_hours),
     },
+    timeZone: String(schoolResult.data.time_zone),
   };
 }

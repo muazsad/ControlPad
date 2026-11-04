@@ -218,15 +218,15 @@ describe("planAttendanceEscalation", () => {
 
 describe("schoolClock", () => {
   it("reads Eastern date and minutes, including across DST", () => {
-    assert.deepEqual(schoolClock(new Date("2026-10-12T14:05:00Z")), {
+    assert.deepEqual(schoolClock(new Date("2026-10-12T14:05:00Z"), "America/New_York"), {
       date: "2026-10-12",
       minutes: at("10:05"),
     });
-    assert.deepEqual(schoolClock(new Date("2026-12-14T15:05:00Z")), {
+    assert.deepEqual(schoolClock(new Date("2026-12-14T15:05:00Z"), "America/New_York"), {
       date: "2026-12-14",
       minutes: at("10:05"),
     });
-    assert.deepEqual(schoolClock(new Date("2026-10-13T03:30:00Z")), {
+    assert.deepEqual(schoolClock(new Date("2026-10-13T03:30:00Z"), "America/New_York"), {
       date: "2026-10-12",
       minutes: at("23:30"),
     });
@@ -234,8 +234,14 @@ describe("schoolClock", () => {
 
   it("treats past dates as fully elapsed and future dates as not started", () => {
     const now = new Date("2026-10-12T14:05:00Z");
-    assert.equal(minutesIntoDate("2026-10-11", now), 24 * 60);
-    assert.equal(minutesIntoDate("2026-10-13", now), -1);
+    assert.equal(minutesIntoDate("2026-10-11", now, "America/New_York"), 24 * 60);
+    assert.equal(minutesIntoDate("2026-10-13", now, "America/New_York"), -1);
+  });
+
+  it("follows the school's own zone", () => {
+    const now = new Date("2026-11-03T15:00:00.000Z");
+    assert.equal(schoolClock(now, "America/New_York").minutes, at("10:00"));
+    assert.equal(schoolClock(now, "America/Los_Angeles").minutes, at("07:00"));
   });
 });
 

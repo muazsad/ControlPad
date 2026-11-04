@@ -112,9 +112,9 @@ function studentLabel(row: NotificationRow) {
   return student ? `${student.first_name} ${student.last_name}` : "—";
 }
 
-function formatTimestamp(value: string) {
+function formatTimestamp(value: string, timeZone: string) {
   return new Date(value).toLocaleString("en-US", {
-    timeZone: "America/New_York",
+    timeZone,
     month: "short",
     day: "numeric",
     hour: "numeric",
@@ -199,7 +199,7 @@ export default async function MessagesPage() {
                   {
                     key: "when",
                     header: "When",
-                    cell: (row) => formatTimestamp(row.created_at),
+                    cell: (row) => formatTimestamp(row.created_at, profile.timeZone),
                     className: "whitespace-nowrap text-muted-foreground",
                   },
                   {
@@ -259,7 +259,7 @@ export default async function MessagesPage() {
               {
                 key: "when",
                 header: "When",
-                cell: (row) => formatTimestamp(row.created_at),
+                cell: (row) => formatTimestamp(row.created_at, profile.timeZone),
                 className: "whitespace-nowrap text-muted-foreground",
               },
               {

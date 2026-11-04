@@ -137,7 +137,7 @@ export default async function QuranStudentPage({
   }
 
   // Memorized juz grid.
-  const today = todayInSchoolTimeZone();
+  const today = todayInSchoolTimeZone(new Date(), profile.timeZone);
   const threshold = Number(
     settingsData?.revision_overdue_school_days ?? DEFAULT_REVISION_OVERDUE_SCHOOL_DAYS,
   );

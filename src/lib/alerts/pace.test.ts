@@ -26,6 +26,7 @@ const context: PaceContext = {
   paceGapThreshold: 10,
   missingAssignmentsThreshold: 3,
   staleGradeSchoolDays: 10,
+  timeZone: "America/New_York",
   calendar: { weeklyPattern: DEFAULT_WEEKLY_PATTERN, breaks: [], specialDays: [] },
   groups: new Map(),
   defaults: { schoolStart: "08:00", tardyWindowHours: 2 },

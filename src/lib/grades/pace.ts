@@ -184,6 +184,8 @@ export type PaceContext = {
   calendar: SchoolCalendarConfig;
   groups: Map<string, ScheduleGroup>;
   defaults: DefaultSchedule;
+  /** The school's IANA zone: timestamps become school-local dates with it. */
+  timeZone: string;
 };
 
 export type LatestPaceSnapshot = {

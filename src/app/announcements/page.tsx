@@ -16,7 +16,6 @@ import {
 import { addDays } from "@/lib/absence-reports/parse";
 import {
   audienceLabel,
-  easternClock,
   UNGROUPED,
   type Audience,
 } from "@/lib/announcements/announcements";
@@ -26,6 +25,7 @@ import { createClient } from "@/lib/supabase/server";
 
 import { cancelAnnouncement } from "./actions";
 import { ComposeForm, type AudienceOption, type CountingStudent } from "./compose-form";
+import { localDate } from "@/lib/schools/clock";
 
 // ── Tunable constants ────────────────────────────────────────────────────────
 
@@ -62,9 +62,9 @@ const statusDisplay: Record<AnnouncementRow["status"], { label: string; tone: St
   failed: { label: "Failed", tone: "danger" },
 };
 
-function formatTimestamp(value: string) {
+function formatTimestamp(value: string, timeZone: string) {
   return new Date(value).toLocaleString("en-US", {
-    timeZone: "America/New_York",
+    timeZone,
     weekday: "short",
     month: "short",
     day: "numeric",
@@ -139,7 +139,7 @@ export default async function AnnouncementsPage() {
 
   const groupNames = new Map(groups.map((group) => [group.id, group.name]));
   const history = historyError ? [] : ((historyData ?? []) as AnnouncementRow[]);
-  const today = easternClock(new Date()).date;
+  const today = localDate(new Date(), profile.timeZone);
 
   return (
     <AppShell fullName={profile.fullName} role={profile.role}>
@@ -194,7 +194,7 @@ export default async function AnnouncementsPage() {
                   header: "When",
                   cell: (row) => (
                     <div className="whitespace-nowrap">
-                      <p>{formatTimestamp(row.sent_at ?? row.send_at)}</p>
+                      <p>{formatTimestamp(row.sent_at ?? row.send_at, profile.timeZone)}</p>
                       {row.status === "scheduled" ? (
                         <p className="mt-1 text-xs text-muted-foreground">Scheduled</p>
                       ) : null}

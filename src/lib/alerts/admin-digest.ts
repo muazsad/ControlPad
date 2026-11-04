@@ -27,8 +27,8 @@ import {
   type ScheduleGroup,
 } from "@/lib/schedule/student-schedule";
 import type { SchoolContext } from "@/lib/schools/school-context";
+import { localClock, localDate } from "@/lib/schools/clock";
 
-const SCHOOL_TIME_ZONE = "America/New_York";
 
 export const GRADE_DROP_THRESHOLD = 5;
 
@@ -253,35 +253,17 @@ function parseTimeToMinutes(time: string) {
   return Number(hour) * 60 + Number(minute);
 }
 
-function datePartsInSchoolTimeZone(now: Date) {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: SCHOOL_TIME_ZONE,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  }).formatToParts(now);
-  const value = (type: string) =>
-    parts.find((part) => part.type === type)?.value ?? "00";
-
-  return {
-    date: `${value("year")}-${value("month")}-${value("day")}`,
-    minutes: Number(value("hour")) * 60 + Number(value("minute")),
-  };
-}
-
-export function todayInSchoolTimeZone(now = new Date()) {
-  return datePartsInSchoolTimeZone(now).date;
+export function todayInSchoolTimeZone(now: Date, timeZone: string) {
+  return localDate(now, timeZone);
 }
 
 function hasDigestTimeArrived(input: {
   date: string;
   now: Date;
   adminDigestTime: string;
+  timeZone: string;
 }) {
-  const current = datePartsInSchoolTimeZone(input.now);
+  const current = localClock(input.now, input.timeZone);
   if (current.date > input.date) return true;
   if (current.date < input.date) return false;
   return current.minutes >= parseTimeToMinutes(input.adminDigestTime);
@@ -741,7 +723,7 @@ export function createSupabaseAdminDigestDatabase(ctx: SchoolContext): AdminDige
 
       const students = (studentsResult.data ?? []) as StudentRow[];
 
-      const clock = now ? datePartsInSchoolTimeZone(now) : null;
+      const clock = now ? localClock(now, ctx.timeZone) : null;
       const unmarked = findUnmarkedStudents({
         date,
         // Today: only past each student's cutoff. Past dates: everyone unmarked.
@@ -774,6 +756,7 @@ export function createSupabaseAdminDigestDatabase(ctx: SchoolContext): AdminDige
           schoolStart: String(settingsRow.school_start).slice(0, 5),
           tardyWindowHours: Number(settingsRow.tardy_window_hours),
         },
+        timeZone: ctx.timeZone,
       };
       const { staleCourses, biggestDrops } = summarizeGradeHealth({
         gradeRows: (gradesResult.data ?? []) as GradeIssueRow[],
@@ -963,6 +946,7 @@ export async function sendAdminDigest(
       date: input.date,
       now: input.now ?? new Date(),
       adminDigestTime: summary.settings.adminDigestTime,
+      timeZone: ctx.timeZone,
     })
   ) {
     return {

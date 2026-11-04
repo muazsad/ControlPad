@@ -39,6 +39,7 @@ export async function createAnnouncement(
     {
       validGroupKeys: new Set([...groups.map((group) => group.id), UNGROUPED]),
       now: new Date(),
+      timeZone: profile.timeZone,
     },
   );
   if (!parsed.ok) return fail(parsed.error);

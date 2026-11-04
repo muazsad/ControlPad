@@ -20,6 +20,7 @@ import {
   type ScheduleGroup,
 } from "@/lib/schedule/student-schedule";
 import type { SchoolContext } from "@/lib/schools/school-context";
+import { localClock } from "@/lib/schools/clock";
 
 // Two-stage absence escalation, driven by each student's schedule group:
 //
@@ -34,7 +35,6 @@ import type { SchoolContext } from "@/lib/schools/school-context";
 
 // ── Tunable constants ────────────────────────────────────────────────────────
 
-const SCHOOL_TIME_ZONE = "America/New_York";
 
 /** Max student names listed in one admin text before "and N more". */
 const ADMIN_MESSAGE_MAX_NAMES = 6;
@@ -113,27 +113,13 @@ export type EscalationSettings = DefaultSchedule & {
 
 // ── Time zone helpers ────────────────────────────────────────────────────────
 
-export function schoolClock(now: Date): { date: string; minutes: number } {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: SCHOOL_TIME_ZONE,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    hourCycle: "h23",
-  }).formatToParts(now);
-  const value = (type: string) =>
-    parts.find((part) => part.type === type)?.value ?? "00";
-  return {
-    date: `${value("year")}-${value("month")}-${value("day")}`,
-    minutes: Number(value("hour")) * 60 + Number(value("minute")),
-  };
+export function schoolClock(now: Date, timeZone: string): { date: string; minutes: number } {
+  return localClock(now, timeZone);
 }
 
 /** Minutes into `date` (school time) that `now` represents, clamped for other days. */
-export function minutesIntoDate(date: string, now: Date): number {
-  const clock = schoolClock(now);
+export function minutesIntoDate(date: string, now: Date, timeZone: string): number {
+  const clock = schoolClock(now, timeZone);
   if (clock.date > date) return 24 * 60;
   if (clock.date < date) return -1;
   return clock.minutes;
@@ -454,8 +440,8 @@ export async function runAttendanceTick(
   const sendDigest =
     deps.sendDigest ?? ((date: string, now: Date) => sendAdminDigest(ctx, { date, now }));
 
-  const date = input.date ?? schoolClock(input.now).date;
-  const nowMinutes = minutesIntoDate(date, input.now);
+  const date = input.date ?? schoolClock(input.now, ctx.timeZone).date;
+  const nowMinutes = minutesIntoDate(date, input.now, ctx.timeZone);
 
   const [settings, calendar, groups, students, admins] = await Promise.all([
     database.getSettings(),

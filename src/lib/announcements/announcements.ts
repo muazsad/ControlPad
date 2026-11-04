@@ -4,6 +4,8 @@
 //
 // Client-safe: imported by the compose form, so no server imports here.
 
+import { localTimeToUtc } from "@/lib/schools/clock";
+
 // ── Tunable constants ────────────────────────────────────────────────────────
 
 /** Longest message (3 standard SMS segments, before the school prefix). */
@@ -99,50 +101,16 @@ export function audienceLabel(audience: Audience, groupNames: Map<string, string
 
 // ── Time ─────────────────────────────────────────────────────────────────────
 
-const SCHOOL_TIME_ZONE = "America/New_York";
-
-/** School-local wall-clock date + minutes for an instant. */
-export function easternClock(now: Date): { date: string; minutes: number } {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: SCHOOL_TIME_ZONE,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    hourCycle: "h23",
-  }).formatToParts(now);
-  const value = (type: string) => parts.find((part) => part.type === type)?.value ?? "00";
-  return {
-    date: `${value("year")}-${value("month")}-${value("day")}`,
-    minutes: Number(value("hour")) * 60 + Number(value("minute")),
-  };
-}
-
 function timeToMinutes(time: string): number {
   const [hours, minutes] = time.split(":").map(Number);
   return hours * 60 + minutes;
-}
-
-/** The UTC instant for a school-local (Eastern) date and time, DST-aware. */
-export function easternToUtc(date: string, time: string): Date {
-  const target = Date.parse(`${date}T${time}:00.000Z`); // the wall-clock time, as if UTC
-  let guess = target;
-  for (let i = 0; i < 3; i += 1) {
-    const clock = easternClock(new Date(guess));
-    const shown = Date.parse(`${clock.date}T00:00:00.000Z`) + clock.minutes * 60_000;
-    const diff = target - shown;
-    if (diff === 0) break;
-    guess += diff;
-  }
-  return new Date(guess);
 }
 
 // ── Form parsing ─────────────────────────────────────────────────────────────
 
 export function parseAnnouncementForm(
   input: AnnouncementFormInput,
-  context: { validGroupKeys: Set<string>; now: Date },
+  context: { validGroupKeys: Set<string>; now: Date; timeZone: string },
 ): { ok: true; values: ParsedAnnouncement } | { ok: false; error: string } {
   const message = input.message.replace(/\s+\n/g, "\n").trim();
   if (!message) return { ok: false, error: "Write the message." };
@@ -178,7 +146,7 @@ export function parseAnnouncementForm(
       error: "Scheduled announcements can go out between 8:00 AM and 6:50 PM.",
     };
   }
-  const sendAt = easternToUtc(input.date, input.time);
+  const sendAt = localTimeToUtc(input.date, input.time, context.timeZone);
   if (sendAt.getTime() <= context.now.getTime()) {
     return { ok: false, error: "That time has already passed. Pick a later time or send now." };
   }

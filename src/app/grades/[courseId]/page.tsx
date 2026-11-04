@@ -18,7 +18,7 @@ import {
   paceForCourse,
 } from "@/lib/grades/pace";
 import { loadPaceContext } from "@/lib/grades/pace-data";
-import { easternDateKey } from "@/lib/grades/sweep";
+import { schoolDateKey } from "@/lib/grades/sweep";
 import { studentName } from "@/lib/people/people";
 import { createClient } from "@/lib/supabase/server";
 
@@ -142,7 +142,7 @@ export default async function CourseGradesPage({
     settingsData?.grade_floor == null ? null : Number(settingsData.grade_floor);
 
   // Pace: latest snapshot vs. where the student should be today.
-  const today = easternDateKey(new Date());
+  const today = schoolDateKey(new Date(), profile.timeZone);
   const courseDates = { startDate: c.start_date, endDate: c.end_date };
   const pace =
     paceContext &&
@@ -173,7 +173,7 @@ export default async function CourseGradesPage({
           paceContext.defaults,
         ),
         snapshots: grades.map((grade) => ({
-          date: easternDateKey(new Date(grade.recorded_at)),
+          date: schoolDateKey(new Date(grade.recorded_at), profile.timeZone),
           percent:
             grade.percent_complete == null
               ? null

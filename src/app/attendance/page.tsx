@@ -61,9 +61,6 @@ function isIsoDate(value: string | undefined): value is string {
   return Boolean(value && /^\d{4}-\d{2}-\d{2}$/.test(value));
 }
 
-function todayIso() {
-  return schoolClock(new Date()).date;
-}
 
 function attendanceTone(status: AttendanceStatus | null) {
   if (status === "present") return "success";
@@ -78,7 +75,7 @@ export default async function AttendancePage({
   const profile = await getCurrentProfile();
   const canManage = profile.role === "admin" || profile.role === "moderator";
   const params = await searchParams;
-  const today = todayIso();
+  const today = schoolClock(new Date(), profile.timeZone).date;
   const selectedDate = isIsoDate(params?.date) ? params.date : today;
   const showAll = params?.view === "all";
   const supabase = await createClient();
@@ -232,7 +229,7 @@ export default async function AttendancePage({
                     <p className="mt-1 text-xs text-muted-foreground">
                       {report.guardianName ?? "Parent"} ·{" "}
                       {new Date(report.createdAt).toLocaleString("en-US", {
-                        timeZone: "America/New_York",
+                        timeZone: profile.timeZone,
                         month: "short",
                         day: "numeric",
                         hour: "numeric",

@@ -34,7 +34,7 @@ import { GradeForm } from "@/app/grades/grade-form";
 import { PaceBar } from "@/components/controlpad/pace-bar";
 import { paceForCourse } from "@/lib/grades/pace";
 import { loadPaceContext } from "@/lib/grades/pace-data";
-import { easternDateKey } from "@/lib/grades/sweep";
+import { schoolDateKey } from "@/lib/grades/sweep";
 import {
   StudentGuardianLinks,
   type LinkedGuardian,
@@ -188,7 +188,7 @@ export default async function StudentDetailPage({
       .gte("date", cutoff),
     loadPaceContext(profile.schoolId),
   ]);
-  const today = easternDateKey(new Date());
+  const today = schoolDateKey(new Date(), profile.timeZone);
 
   const linked: LinkedGuardian[] = (links ?? []).map((row) => {
     const g = row.guardians as unknown as Guardian;

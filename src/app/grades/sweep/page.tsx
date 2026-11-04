@@ -6,9 +6,8 @@ import { PageHeader } from "@/components/controlpad/page-header";
 import { Button } from "@/components/ui/button";
 import { requireRole } from "@/lib/auth/current-profile";
 import {
-  SCHOOL_TIME_ZONE,
   SWEEP_WINDOW_DAYS,
-  easternDateKey,
+  schoolDateKey,
   isWithinSweepWindow,
 } from "@/lib/grades/sweep";
 import { studentGradeHealth } from "@/lib/grades/grade-health";
@@ -35,12 +34,12 @@ type StudentRow = {
   }[];
 };
 
-function formatGradeDate(recordedAt: string, now: Date): string {
+function formatGradeDate(recordedAt: string, now: Date, timeZone: string): string {
   const date = new Date(recordedAt);
   const sameYear =
-    easternDateKey(date).slice(0, 4) === easternDateKey(now).slice(0, 4);
+    schoolDateKey(date, timeZone).slice(0, 4) === schoolDateKey(now, timeZone).slice(0, 4);
   return date.toLocaleDateString("en-US", {
-    timeZone: SCHOOL_TIME_ZONE,
+    timeZone,
     month: "short",
     day: "numeric",
     ...(sameYear ? {} : { year: "numeric" }),
@@ -67,7 +66,7 @@ export default async function GradeSweepPage() {
     fetchLatestGrades(supabase),
     loadPaceContext(profile.schoolId),
   ]);
-  const today = easternDateKey(now);
+  const today = schoolDateKey(now, profile.timeZone);
   if (error) throw error;
 
   const students = ((data ?? []) as unknown as StudentRow[])
@@ -111,13 +110,13 @@ export default async function GradeSweepPage() {
         courseName: course.name,
         groupId: student.schedule_group_id,
         lastValue: latest?.value ?? null,
-        lastDate: latest ? formatGradeDate(latest.recordedAt, now) : null,
+        lastDate: latest ? formatGradeDate(latest.recordedAt, now, profile.timeZone) : null,
         lastPercent: latest?.percentComplete ?? null,
         lastMissing: latest?.missingAssignments ?? null,
         expectedPercent: pace.expected,
         paceTone: pace.paceTone,
         missingTone: pace.missingTone,
-        updatedRecently: isWithinSweepWindow(latest?.recordedAt ?? null, now),
+        updatedRecently: isWithinSweepWindow(latest?.recordedAt ?? null, now, profile.timeZone),
         staleStatus: staleness?.status ?? "fresh",
         staleDays: staleness?.schoolDaysSince ?? null,
       });
@@ -146,7 +145,7 @@ export default async function GradeSweepPage() {
 
         <SweepForm
           userId={profile.id}
-          todayKey={easternDateKey(now)}
+          todayKey={schoolDateKey(now, profile.timeZone)}
           rows={rows}
           groups={[...groups.values()].sort((a, b) => byText(a.name, b.name))}
         />

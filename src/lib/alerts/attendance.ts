@@ -11,7 +11,6 @@ import {
 } from "@/lib/schedule/student-schedule";
 import type { SchoolContext } from "@/lib/schools/school-context";
 
-const SCHOOL_TIME_ZONE = "America/New_York";
 
 /** Tardies are counted over each student's last N expected school days. */
 export const TARDY_WINDOW_SCHOOL_DAYS = 7;
@@ -117,29 +116,6 @@ function firstRelated<T>(value: T | T[] | null): T | null {
 
 function studentName(student: Pick<AttendanceAlertStudent, "first_name" | "last_name">) {
   return `${student.first_name} ${student.last_name}`.trim();
-}
-
-function schoolDateParts(now: Date) {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: SCHOOL_TIME_ZONE,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  }).formatToParts(now);
-  const value = (type: string) =>
-    parts.find((part) => part.type === type)?.value ?? "00";
-
-  return {
-    date: `${value("year")}-${value("month")}-${value("day")}`,
-    minutes: Number(value("hour")) * 60 + Number(value("minute")),
-  };
-}
-
-export function todayInSchoolTimeZone(now = new Date()) {
-  return schoolDateParts(now).date;
 }
 
 function addDays(date: string, days: number): string {

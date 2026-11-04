@@ -161,6 +161,8 @@ export default async function SettingsPage() {
               specialDays={specialDays}
               groups={scheduleGroups.map((group) => ({ id: group.id, name: group.name }))}
               recipientCounts={recipientCounts}
+              smsName={profile.smsName}
+              timeZone={profile.timeZone}
             />
           </div>
         )}

@@ -13,7 +13,7 @@ import { formatGrade, gradeTone } from "./grade-display";
 import { studentGradeHealth } from "@/lib/grades/grade-health";
 import { paceForCourse, worstTone } from "@/lib/grades/pace";
 import { loadPaceContext } from "@/lib/grades/pace-data";
-import { easternDateKey } from "@/lib/grades/sweep";
+import { schoolDateKey } from "@/lib/grades/sweep";
 import { TREND_WINDOW_DAYS, trendTone } from "@/lib/grades/trend";
 import { getAllStudentMetrics } from "@/lib/people/student-metrics";
 import { createClient } from "@/lib/supabase/server";
@@ -36,7 +36,7 @@ export default async function GradesPage({
     canManage ? loadPaceContext(profile.schoolId) : Promise.resolve(null),
   ]);
 
-  const today = easternDateKey(new Date());
+  const today = schoolDateKey(new Date(), profile.timeZone);
   const students = metrics.map((student) => {
     if (!paceContext) {
       return { ...student, paceBehind: 0, paceMissing: 0, paceTone: "neutral" as const, health: null };

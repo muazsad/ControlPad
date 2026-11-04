@@ -11,7 +11,7 @@ import { getCurrentProfile } from "@/lib/auth/current-profile";
 import { enrollmentBadgeTone } from "@/lib/people/people";
 import { studentGradeHealth } from "@/lib/grades/grade-health";
 import { loadPaceContext } from "@/lib/grades/pace-data";
-import { easternDateKey } from "@/lib/grades/sweep";
+import { schoolDateKey } from "@/lib/grades/sweep";
 import { getAllStudentMetrics } from "@/lib/people/student-metrics";
 
 export default async function StudentsPage() {
@@ -24,7 +24,7 @@ export default async function StudentsPage() {
 
   // Staleness is staff-only (parents can't read settings): no badge for them.
   const paceContext = canManage ? await loadPaceContext(profile.schoolId) : null;
-  const today = easternDateKey(new Date());
+  const today = schoolDateKey(new Date(), profile.timeZone);
   const students = metrics.map((student) => ({
     ...student,
     health: paceContext
