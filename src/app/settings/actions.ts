@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { requireRole, schoolContextOf } from "@/lib/auth/current-profile";
 import { createClient } from "@/lib/supabase/server";
 import { sendSpecialDayNotice } from "@/lib/alerts/special-day";
+import { isValidTimeZone } from "@/lib/schools/time-zones";
 import { WEEKDAY_KEYS } from "@/lib/schedule/calendar";
 import { parseSpecialDayForm } from "@/lib/schedule/special-day-validation";
 
@@ -467,4 +468,34 @@ export async function deleteScheduleGroup(id: string) {
   revalidatePath("/settings");
   revalidatePath("/attendance");
   revalidatePath("/students");
+}
+
+// ── School details ───────────────────────────────────────────────────────────
+
+export async function updateSchool(
+  _prev: SettingsFormState,
+  formData: FormData,
+): Promise<SettingsFormState> {
+  const profile = await requireRole(["admin"]);
+  const name = ((formData.get("school_name") as string | null) ?? "").trim();
+  const smsName = ((formData.get("sms_name") as string | null) ?? "").trim() || name;
+  const timeZone = ((formData.get("time_zone") as string | null) ?? "").trim();
+  if (name.length < 2 || name.length > 80) {
+    return { error: "School name must be 2–80 characters.", success: null };
+  }
+  if (smsName.length < 2 || smsName.length > 40) {
+    return { error: "Name on texts must be 2–40 characters.", success: null };
+  }
+  if (!isValidTimeZone(timeZone)) return { error: "Pick a time zone.", success: null };
+
+  const supabase = await createClient();
+  // RLS (schools_admin_update) + column grants limit this to the admin's own school.
+  const { error } = await supabase
+    .from("schools")
+    .update({ name, sms_name: smsName, time_zone: timeZone })
+    .eq("id", profile.schoolId);
+  if (error) return { error: error.message, success: null };
+
+  revalidatePath("/", "layout");
+  return { error: null, success: "School details saved." };
 }

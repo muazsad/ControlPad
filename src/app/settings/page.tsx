@@ -18,11 +18,14 @@ import {
   getStaffMembers,
 } from "@/lib/people/staff-accountability-data";
 import { getScheduleGroups } from "@/lib/schedule/schedule-groups-data";
+import { loadTextingView } from "@/lib/sms/texting-view";
 import { createClient } from "@/lib/supabase/server";
 
 import { ScheduleForm } from "./schedule-form";
 import { ScheduleGroupsForm } from "./schedule-groups-form";
+import { SchoolForm } from "./school-form";
 import { SettingsForm } from "./settings-form";
+import { TextingForm } from "./texting-form";
 import type { SettingsValues } from "./settings-validation";
 
 type SettingsRow = SettingsValues & {
@@ -147,6 +150,12 @@ export default async function SettingsPage() {
           />
         ) : (
           <div className="space-y-8">
+            <SchoolForm
+              name={profile.schoolName}
+              smsName={profile.smsName}
+              timeZone={profile.timeZone}
+            />
+            <TextingForm view={await loadTextingView(profile.schoolId)} />
             <SettingsForm settings={settings} />
             <ScheduleGroupsForm
               groups={scheduleGroups}

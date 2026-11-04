@@ -296,3 +296,30 @@ describe("maskPhone", () => {
     assert.equal(maskPhone("+14135550101"), "•••0101");
   });
 });
+
+describe("decideDedupe", () => {
+  const row = (
+    status: RecentNotification["status"],
+    delivery_mode: RecentNotification["delivery_mode"],
+  ): RecentNotification => ({ id: "n", status, delivery_mode });
+
+  it("sends when there is nothing recent", () => {
+    assert.equal(decideDedupe([], "live").action, "send");
+  });
+
+  it("treats rows logged before delivery modes existed as same-mode", () => {
+    assert.equal(decideDedupe([row("sent", null)], "live").action, "duplicate");
+  });
+
+  it("lets a real live send block a dry run while texting is off", () => {
+    assert.equal(decideDedupe([row("sent", "live")], "off").action, "duplicate");
+  });
+
+  it("only counts same-mode failures toward the retry cap", () => {
+    const testFailures = Array.from({ length: MAX_FAILED_SEND_ATTEMPTS }, () =>
+      row("failed", "test"),
+    );
+    assert.equal(decideDedupe(testFailures, "live").action, "send");
+    assert.equal(decideDedupe(testFailures, "test").action, "gave_up");
+  });
+});
