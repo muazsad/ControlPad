@@ -13,6 +13,14 @@ import {
   DEFAULT_WEEKLY_PATTERN,
   type SchoolCalendarConfig,
 } from "@/lib/schedule/calendar";
+import type { SchoolContext } from "@/lib/schools/school-context";
+
+const TEST_SCHOOL: SchoolContext = {
+  schoolId: "school-1",
+  name: "Test School",
+  smsName: "Test School",
+  timeZone: "America/New_York",
+};
 
 class FakeAttendanceAlertDatabase implements AttendanceAlertDatabase {
   settings = {
@@ -66,7 +74,7 @@ describe("attendance alerts", () => {
     const database = new FakeAttendanceAlertDatabase();
     const sent: SendSmsInput[] = [];
 
-    const result = await checkTardyThresholdAlerts(
+    const result = await checkTardyThresholdAlerts(TEST_SCHOOL, 
       {
         date: "2026-06-25",
       },

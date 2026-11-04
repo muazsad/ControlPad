@@ -26,6 +26,7 @@ import {
   type DefaultSchedule,
   type ScheduleGroup,
 } from "@/lib/schedule/student-schedule";
+import type { SchoolContext } from "@/lib/schools/school-context";
 
 const SCHOOL_TIME_ZONE = "America/New_York";
 
@@ -634,7 +635,7 @@ function namesForDigest(summary: AdminDailySummary) {
   return Array.from(new Set(names)).slice(0, 5);
 }
 
-export function createSupabaseAdminDigestDatabase(): AdminDigestDatabase {
+export function createSupabaseAdminDigestDatabase(ctx: SchoolContext): AdminDigestDatabase {
   const supabase = createServiceClient();
 
   return {
@@ -644,7 +645,7 @@ export function createSupabaseAdminDigestDatabase(): AdminDigestDatabase {
         .select(
           "admin_digest_time, grade_floor, quran_inactivity_days, payment_due_day, school_start, tardy_window_hours, term_start, term_end, pace_gap_threshold, missing_assignments_threshold, stale_grade_school_days, revision_overdue_school_days",
         )
-        .eq("id", 1)
+        .eq("school_id", ctx.schoolId)
         .single();
 
       if (settingsError) throw new Error(settingsError.message);
@@ -660,8 +661,8 @@ export function createSupabaseAdminDigestDatabase(): AdminDigestDatabase {
         revisionOverdueSchoolDays: Number(settingsRow.revision_overdue_school_days),
       };
       const [calendar, groups] = await Promise.all([
-        getServiceSchoolCalendar(),
-        getServiceScheduleGroups(),
+        getServiceSchoolCalendar(ctx.schoolId),
+        getServiceScheduleGroups(ctx.schoolId),
       ]);
       const schoolDayType = dayType(date, calendar);
       const schoolIsInSession = isSchoolDay(date, calendar);
@@ -679,28 +680,34 @@ export function createSupabaseAdminDigestDatabase(): AdminDigestDatabase {
         supabase
           .from("attendance")
           .select("student_id, status, students(id, first_name, last_name)")
+          .eq("school_id", ctx.schoolId)
           .eq("date", date),
         supabase
           .from("grades")
           .select(
             "course_id, grade_value, percent_complete, missing_assignments, recorded_at, courses(id, name, start_date, end_date), students(id, first_name, last_name)",
           )
+          .eq("school_id", ctx.schoolId)
           .order("recorded_at", { ascending: false }),
         supabase
           .from("students")
           .select(
             "id, first_name, last_name, created_at, schedule_group_id, courses(id, name, created_at)",
           )
+          .eq("school_id", ctx.schoolId)
           .eq("enrollment_status", "active"),
         supabase
           .from("quran_progress")
           .select("student_id, date, lesson_type, juz")
+          .eq("school_id", ctx.schoolId)
           .order("date", { ascending: false }),
         supabase
           .from("payments")
           .select("student_id, period_month, status")
+          .eq("school_id", ctx.schoolId)
           .eq("period_month", periodMonthFor(date)),
         supabase.from("student_memorized_juz").select("student_id, juz, marked_at")
+          .eq("school_id", ctx.schoolId),
       ]);
 
       if (attendanceResult.error) throw new Error(attendanceResult.error.message);
@@ -890,6 +897,7 @@ export function createSupabaseAdminDigestDatabase(): AdminDigestDatabase {
       const { data, error } = await supabase
         .from("profiles")
         .select("full_name, phone")
+        .eq("school_id", ctx.schoolId)
         .eq("role", "admin")
         .not("phone", "is", null);
 
@@ -900,10 +908,11 @@ export function createSupabaseAdminDigestDatabase(): AdminDigestDatabase {
 }
 
 export async function getAdminDailySummary(
+  ctx: SchoolContext,
   asOfDate: string,
   deps: AdminDigestDeps & { now?: Date } = {},
 ) {
-  const database = deps.database ?? createSupabaseAdminDigestDatabase();
+  const database = deps.database ?? createSupabaseAdminDigestDatabase(ctx);
   return database.getSummary(asOfDate, deps.now);
 }
 
@@ -936,10 +945,11 @@ export function formatAdminDigestSms(summary: AdminDailySummary) {
 }
 
 export async function sendAdminDigest(
+  ctx: SchoolContext,
   input: { date: string; force?: boolean; now?: Date },
   deps: AdminDigestDeps = {},
 ): Promise<AdminDigestSendResult> {
-  const database = deps.database ?? createSupabaseAdminDigestDatabase();
+  const database = deps.database ?? createSupabaseAdminDigestDatabase(ctx);
   const send = deps.sendSms ?? sendSms;
   const summary = await database.getSummary(input.date, input.now ?? new Date());
 

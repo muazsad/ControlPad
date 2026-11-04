@@ -12,6 +12,14 @@ import {
   type PaceAlertDatabase,
   type PaceAlertInput,
 } from "./pace";
+import type { SchoolContext } from "@/lib/schools/school-context";
+
+const TEST_SCHOOL: SchoolContext = {
+  schoolId: "school-1",
+  name: "Test School",
+  smsName: "Test School",
+  timeZone: "America/New_York",
+};
 
 const context: PaceContext = {
   term: { termStart: "2026-10-05", termEnd: "2026-10-18" },
@@ -48,7 +56,7 @@ const now = new Date("2026-10-12T14:00:00Z");
 
 async function run(overrides: Partial<PaceAlertInput>) {
   const sent: SendSmsInput[] = [];
-  const result = await checkPaceAlerts(
+  const result = await checkPaceAlerts(TEST_SCHOOL, 
     { ...input, ...overrides },
     {
       database,
@@ -96,7 +104,7 @@ describe("checkPaceAlerts", () => {
 
   it("skips pace when there is no percent or no window", async () => {
     assert.equal((await run({ percentComplete: null })).sent.length, 0);
-    const noWindow = await checkPaceAlerts(
+    const noWindow = await checkPaceAlerts(TEST_SCHOOL, 
       { ...input },
       {
         database,

@@ -19,6 +19,7 @@ import {
   type DefaultSchedule,
   type ScheduleGroup,
 } from "@/lib/schedule/student-schedule";
+import type { SchoolContext } from "@/lib/schools/school-context";
 
 // Two-stage absence escalation, driven by each student's schedule group:
 //
@@ -321,7 +322,7 @@ type StudentRow = {
     | null;
 };
 
-export function createSupabaseEscalationDatabase(): EscalationDatabase {
+export function createSupabaseEscalationDatabase(ctx: SchoolContext): EscalationDatabase {
   const supabase = createServiceClient();
 
   return {
@@ -329,7 +330,7 @@ export function createSupabaseEscalationDatabase(): EscalationDatabase {
       const { data, error } = await supabase
         .from("settings")
         .select("school_start, tardy_window_hours, parent_alert_delay_minutes, admin_digest_time")
-        .eq("id", 1)
+        .eq("school_id", ctx.schoolId)
         .single();
       if (error) throw new Error(error.message);
       return {
@@ -339,12 +340,13 @@ export function createSupabaseEscalationDatabase(): EscalationDatabase {
         adminDigestTime: String(data.admin_digest_time).slice(0, 5),
       };
     },
-    getSchoolCalendar: getServiceSchoolCalendar,
-    getScheduleGroups: getServiceScheduleGroups,
+    getSchoolCalendar: () => getServiceSchoolCalendar(ctx.schoolId),
+    getScheduleGroups: () => getServiceScheduleGroups(ctx.schoolId),
     async getAdminRecipients() {
       const { data, error } = await supabase
         .from("profiles")
         .select("phone")
+        .eq("school_id", ctx.schoolId)
         .eq("role", "admin")
         .not("phone", "is", null);
       if (error) throw new Error(error.message);
@@ -356,6 +358,7 @@ export function createSupabaseEscalationDatabase(): EscalationDatabase {
         .select(
           "id, first_name, last_name, schedule_group_id, attendance(status, date), student_guardians(guardians(full_name, phone))",
         )
+        .eq("school_id", ctx.schoolId)
         .eq("enrollment_status", "active")
         .eq("attendance.date", date);
       if (error) throw new Error(error.message);
@@ -365,6 +368,7 @@ export function createSupabaseEscalationDatabase(): EscalationDatabase {
       const { data: reportData, error: reportError } = await supabase
         .from("absence_reports")
         .select("student_id")
+        .eq("school_id", ctx.schoolId)
         .eq("date", date)
         .in("status", REPORTED_ABSENCE_STATUSES);
       const reported = new Set(
@@ -409,6 +413,7 @@ export type AttendanceTickResult = {
 };
 
 export async function runAttendanceTick(
+  ctx: SchoolContext,
   input: { now: Date; date?: string },
   deps: {
     database?: EscalationDatabase;
@@ -422,19 +427,19 @@ export async function runAttendanceTick(
     ) => Promise<{ sent: boolean; skippedReason?: string }>;
   } = {},
 ): Promise<AttendanceTickResult> {
-  const database = deps.database ?? createSupabaseEscalationDatabase();
+  const database = deps.database ?? createSupabaseEscalationDatabase(ctx);
   const send = deps.sendSms ?? sendSms;
   const checkTardies =
-    deps.checkTardies ?? ((date: string) => checkTardyThresholdAlerts({ date }));
+    deps.checkTardies ?? ((date: string) => checkTardyThresholdAlerts(ctx, { date }));
   // The daily Quran check covers inactivity (quran_slip) and memorized juz
   // that need revision (revision_overdue). A revision failure doesn't stop slip texts.
   const checkQuran =
     deps.checkQuran ??
     (async (date: string) => {
-      const slip = await checkQuranSlipAlerts(date);
+      const slip = await checkQuranSlipAlerts(ctx, date);
       let revisionMessages = 0;
       try {
-        revisionMessages = (await checkRevisionOverdueAlerts(date)).messages;
+        revisionMessages = (await checkRevisionOverdueAlerts(ctx, date)).messages;
       } catch (error) {
         console.error(
           "Revision overdue check failed",
@@ -445,9 +450,9 @@ export async function runAttendanceTick(
     });
   const sendNotice =
     deps.sendSpecialDayNotice ??
-    ((date: string, now: Date) => sendSpecialDayNotice({ date, now }));
+    ((date: string, now: Date) => sendSpecialDayNotice(ctx, { date, now }));
   const sendDigest =
-    deps.sendDigest ?? ((date: string, now: Date) => sendAdminDigest({ date, now }));
+    deps.sendDigest ?? ((date: string, now: Date) => sendAdminDigest(ctx, { date, now }));
 
   const date = input.date ?? schoolClock(input.now).date;
   const nowMinutes = minutesIntoDate(date, input.now);

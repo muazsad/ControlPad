@@ -8,6 +8,7 @@ import { loadPaceContext } from "@/lib/grades/pace-data";
 import { easternDateKey } from "@/lib/grades/sweep";
 import { sendSms, type SendSmsInput, type SmsResult } from "@/lib/sms/send-sms";
 import { createServiceClient } from "@/lib/supabase/server";
+import type { SchoolContext } from "@/lib/schools/school-context";
 
 // Event-based alerts for course pace and missing assignments. Called after a
 // grade snapshot is saved; every text goes through sendSms() (which logs it and
@@ -47,7 +48,7 @@ export type PaceAlertResult = {
   recipients: number;
 };
 
-export function createSupabasePaceAlertDatabase(): PaceAlertDatabase {
+export function createSupabasePaceAlertDatabase(ctx: SchoolContext): PaceAlertDatabase {
   const supabase = createServiceClient();
 
   return {
@@ -55,6 +56,7 @@ export function createSupabasePaceAlertDatabase(): PaceAlertDatabase {
       const { data, error } = await supabase
         .from("profiles")
         .select("full_name, phone")
+        .eq("school_id", ctx.schoolId)
         .eq("role", "admin")
         .not("phone", "is", null);
       if (error) throw new Error(error.message);
@@ -64,6 +66,7 @@ export function createSupabasePaceAlertDatabase(): PaceAlertDatabase {
       const { data, error } = await supabase
         .from("student_guardians")
         .select("guardians(full_name, phone)")
+        .eq("school_id", ctx.schoolId)
         .eq("student_id", studentId);
       if (error) throw new Error(error.message);
       return (data ?? [])
@@ -105,11 +108,12 @@ export function missingAssignmentsMessage(input: {
 }
 
 export async function checkPaceAlerts(
+  ctx: SchoolContext,
   input: PaceAlertInput,
   deps: PaceAlertDeps = {},
 ): Promise<PaceAlertResult> {
   const send = deps.sendSms ?? sendSms;
-  const context = deps.context ?? (await loadPaceContext({ service: true }));
+  const context = deps.context ?? (await loadPaceContext(ctx.schoolId, { service: true }));
   const today = easternDateKey(deps.now ?? new Date());
   const week = isoWeekKey(today);
 
@@ -137,7 +141,7 @@ export async function checkPaceAlerts(
     return { paceAlerted: false, missingAlerted: false, recipients: 0 };
   }
 
-  const database = deps.database ?? createSupabasePaceAlertDatabase();
+  const database = deps.database ?? createSupabasePaceAlertDatabase(ctx);
   const [admins, guardians] = await Promise.all([
     database.getAdminRecipients(),
     database.getGuardianRecipients(input.studentId),

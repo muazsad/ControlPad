@@ -24,7 +24,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { getPendingAbsenceReports } from "@/lib/absence-reports/reports-data";
-import { getCurrentProfile } from "@/lib/auth/current-profile";
+import { getCurrentProfile, schoolContextOf } from "@/lib/auth/current-profile";
 import { getStaffChecklist } from "@/lib/people/staff-accountability-data";
 import type { TeacherChecklist } from "@/lib/people/staff-accountability";
 
@@ -893,7 +893,7 @@ export default async function HomePage() {
     const today = todayInSchoolTimeZone();
     let pendingReports: Awaited<ReturnType<typeof getPendingAbsenceReports>>;
     [adminDailySummary, adminEscalations, pendingReports, staffChecklist] = await Promise.all([
-      getAdminDailySummary(today, { now: new Date() }),
+      getAdminDailySummary(schoolContextOf(profile), today, { now: new Date() }),
       getEscalationStudents(profile.schoolId, today),
       getPendingAbsenceReports(),
       // A checklist failure shouldn't take down the dashboard.

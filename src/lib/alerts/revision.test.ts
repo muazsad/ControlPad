@@ -5,6 +5,14 @@ import { DEFAULT_WEEKLY_PATTERN } from "@/lib/schedule/calendar";
 import type { SendSmsInput } from "@/lib/sms/send-sms";
 
 import { checkRevisionOverdueAlerts, type RevisionAlertDatabase, type RevisionStudent } from "./revision";
+import type { SchoolContext } from "@/lib/schools/school-context";
+
+const TEST_SCHOOL: SchoolContext = {
+  schoolId: "school-1",
+  name: "Test School",
+  smsName: "Test School",
+  timeZone: "America/New_York",
+};
 
 function database(students: RevisionStudent[]): RevisionAlertDatabase {
   return {
@@ -39,7 +47,7 @@ const yusuf: RevisionStudent = {
 
 async function run(date: string, students: RevisionStudent[]) {
   const sent: SendSmsInput[] = [];
-  const result = await checkRevisionOverdueAlerts(date, {
+  const result = await checkRevisionOverdueAlerts(TEST_SCHOOL, date, {
     database: database(students),
     sendSms: async (message) => {
       sent.push(message);

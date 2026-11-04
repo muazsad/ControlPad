@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 
-import { requireRole } from "@/lib/auth/current-profile";
+import { requireRole, schoolContextOf } from "@/lib/auth/current-profile";
 import { createClient } from "@/lib/supabase/server";
 import { sendSpecialDayNotice } from "@/lib/alerts/special-day";
 import { WEEKDAY_KEYS } from "@/lib/schedule/calendar";
@@ -286,10 +286,10 @@ export async function applySpecialDayRange(
 export async function textParentsForSpecialDay(
   date: string,
 ): Promise<SpecialDayFormState> {
-  await requireRole(["admin"]);
+  const profile = await requireRole(["admin"]);
 
   try {
-    const result = await sendSpecialDayNotice({ date });
+    const result = await sendSpecialDayNotice(schoolContextOf(profile), { date });
     revalidatePath("/settings");
     revalidatePath("/messages");
     if (!result.sent) return { error: result.reason, success: null };

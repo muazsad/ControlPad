@@ -13,6 +13,14 @@ import {
   type SpecialDayNoticeDatabase,
   type SpecialDayStudent,
 } from "./special-day";
+import type { SchoolContext } from "@/lib/schools/school-context";
+
+const TEST_SCHOOL: SchoolContext = {
+  schoolId: "school-1",
+  name: "Test School",
+  smsName: "Test School",
+  timeZone: "America/New_York",
+};
 
 const students: SpecialDayStudent[] = [
   { groupId: null, guardians: [{ phone: "+14135550101" }, { phone: null }] },
@@ -101,7 +109,7 @@ describe("sendSpecialDayNotice", () => {
       },
     };
     const sent: SendSmsInput[] = [];
-    const result = await sendSpecialDayNotice(
+    const result = await sendSpecialDayNotice(TEST_SCHOOL, 
       { date: "2026-10-22" },
       {
         database,
@@ -123,7 +131,7 @@ describe("sendSpecialDayNotice", () => {
   });
 
   it("refuses when there's no message", async () => {
-    const result = await sendSpecialDayNotice(
+    const result = await sendSpecialDayNotice(TEST_SCHOOL, 
       { date: "2026-10-22" },
       {
         database: {

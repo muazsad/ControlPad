@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 
 import { parseAnnouncementForm, UNGROUPED } from "@/lib/announcements/announcements";
 import { sendAnnouncement } from "@/lib/announcements/send";
-import { requireRole } from "@/lib/auth/current-profile";
+import { requireRole, schoolContextOf } from "@/lib/auth/current-profile";
 import { getScheduleGroups } from "@/lib/schedule/schedule-groups-data";
 import { createClient } from "@/lib/supabase/server";
 
@@ -68,7 +68,7 @@ export async function createAnnouncement(
     };
   }
 
-  const result = await sendAnnouncement(data.id as string);
+  const result = await sendAnnouncement(schoolContextOf(profile), data.id as string);
   revalidatePath("/announcements");
   if (result.status === "not_claimed") return fail("This announcement was already sent.");
   if (result.status === "failed") {

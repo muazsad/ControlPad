@@ -9,6 +9,7 @@ import {
   type DefaultSchedule,
   type ScheduleGroup,
 } from "@/lib/schedule/student-schedule";
+import type { SchoolContext } from "@/lib/schools/school-context";
 
 const SCHOOL_TIME_ZONE = "America/New_York";
 
@@ -198,13 +199,14 @@ export function studentsAtTardyThreshold(input: {
   return result;
 }
 
-async function guardianMapForStudents(studentIds: string[]) {
+async function guardianMapForStudents(ctx: SchoolContext, studentIds: string[]) {
   if (studentIds.length === 0) return new Map<string, GuardianRecipient[]>();
 
   const supabase = createServiceClient();
   const { data, error } = await supabase
     .from("student_guardians")
     .select("student_id, guardians(full_name, phone)")
+    .eq("school_id", ctx.schoolId)
     .in("student_id", studentIds);
 
   if (error) throw new Error(error.message);
@@ -220,7 +222,7 @@ async function guardianMapForStudents(studentIds: string[]) {
   return map;
 }
 
-export function createSupabaseAttendanceAlertDatabase(): AttendanceAlertDatabase {
+export function createSupabaseAttendanceAlertDatabase(ctx: SchoolContext): AttendanceAlertDatabase {
   const supabase = createServiceClient();
 
   return {
@@ -228,7 +230,7 @@ export function createSupabaseAttendanceAlertDatabase(): AttendanceAlertDatabase
       const { data, error } = await supabase
         .from("settings")
         .select("school_start, tardy_window_hours, tardies_per_week")
-        .eq("id", 1)
+        .eq("school_id", ctx.schoolId)
         .single();
 
       if (error) throw new Error(error.message);
@@ -239,25 +241,27 @@ export function createSupabaseAttendanceAlertDatabase(): AttendanceAlertDatabase
       };
     },
     async getSchoolCalendar() {
-      return getServiceSchoolCalendar();
+      return getServiceSchoolCalendar(ctx.schoolId);
     },
     async getAdminRecipients() {
       const { data, error } = await supabase
         .from("profiles")
         .select("full_name, phone")
+        .eq("school_id", ctx.schoolId)
         .eq("role", "admin")
         .not("phone", "is", null);
 
       if (error) throw new Error(error.message);
       return (data ?? []) as Recipient[];
     },
-    getScheduleGroups: getServiceScheduleGroups,
+    getScheduleGroups: () => getServiceScheduleGroups(ctx.schoolId),
     async getTardyCandidates({ startDate, endDate }) {
       const { data, error } = await supabase
         .from("attendance")
         .select(
           "student_id, date, students(id, first_name, last_name, schedule_group_id, enrollment_status)",
         )
+        .eq("school_id", ctx.schoolId)
         .eq("status", "tardy")
         .gte("date", startDate)
         .lte("date", endDate);
@@ -273,7 +277,7 @@ export function createSupabaseAttendanceAlertDatabase(): AttendanceAlertDatabase
         byStudent.set(row.student_id, entry);
       }
 
-      const guardianMap = await guardianMapForStudents(Array.from(byStudent.keys()));
+      const guardianMap = await guardianMapForStudents(ctx, Array.from(byStudent.keys()));
 
       return Array.from(byStudent.entries()).map(([studentId, { student, dates }]) => ({
         id: student.id,
@@ -288,10 +292,11 @@ export function createSupabaseAttendanceAlertDatabase(): AttendanceAlertDatabase
 }
 
 export async function checkTardyThresholdAlerts(
+  ctx: SchoolContext,
   input: TardyAlertInput,
   deps: AlertDeps = {},
 ): Promise<AlertResult> {
-  const database = deps.database ?? createSupabaseAttendanceAlertDatabase();
+  const database = deps.database ?? createSupabaseAttendanceAlertDatabase(ctx);
   const send = deps.sendSms ?? sendSms;
   const [settings, calendar, groups, candidates] = await Promise.all([
     database.getAttendanceSettings(),
