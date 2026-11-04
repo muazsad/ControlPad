@@ -28,6 +28,7 @@ async function findSchoolByNumber(to: string) {
     .from("school_sms_config")
     .select("school_id, twilio_auth_token_enc")
     .eq("twilio_phone_number", to)
+    .not("verified_at", "is", null)
     .maybeSingle();
   if (error) throw new Error(error.message);
   if (!data?.twilio_auth_token_enc) return null;

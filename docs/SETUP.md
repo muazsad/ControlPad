@@ -117,13 +117,15 @@ The multi-school migrations (`20261103*`) rewrite every security rule. Try them 
 3. On the preview: sign up, create a school, add a student — and check the old data is invisible.
 4. Then `supabase db push` to production and deploy straight away (existing logins see "Set up your school" until the new code is live).
 
-Existing data moves into a hidden **"Pre-multi-tenant archive"** school that nobody can see. Recreate your school by signing in (or up) and going through onboarding. When you're sure the old data isn't needed:
+Existing data moves into a hidden **"Pre-multi-tenant archive"** school that nobody can see. Recreate your school by signing in with your existing account and going through onboarding.
+
+Old staff and parent logins stay parked in the archive, so their emails can't be added to the new school yet. Once your own school exists and you're sure the old data isn't needed:
 
 ```
-node --env-file=.env.local scripts/delete-archive-school.mjs
+node --env-file=.env.local scripts/delete-archive-school.mjs --with-logins
 ```
 
-It prints counts and asks you to type `DELETE`.
+It prints counts, asks you to type `DELETE`, deletes the archive school, then deletes the parked logins (never platform admins), so you can re-add those people from Staff and Guardians. Leave off `--with-logins` to keep the logins.
 
 ---
 

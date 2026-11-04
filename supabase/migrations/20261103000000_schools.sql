@@ -65,7 +65,7 @@ as $$
   where p.id = auth.uid() and not s.archived
 $$;
 
-revoke all on function public.current_school_id() from public;
+revoke all on function public.current_school_id() from public, anon;
 grant execute on function public.current_school_id() to authenticated, service_role;
 
 commit;

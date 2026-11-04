@@ -329,7 +329,7 @@ ControlPad holds **children's educational records and family phone numbers**:
 ## 10. Known gaps & next up
 
 **Multi-school release (Nov 3, 2026) — on branch `feat/multi-tenant`, not merged or applied:**
-- Owner steps before/at release, in order: SETUP §9 (test the migrations on a copy + `supabase test db`), add `SMS_CREDENTIALS_KEY` (SETUP §4), custom SMTP + redirect URLs (SETUP §8), `supabase db push` and deploy together, add yourself to `platform_admins` (SETUP §7), recreate Salaam Institute via onboarding and enter its Twilio in Settings → Texting, later run `scripts/delete-archive-school.mjs`. Then delete the old `TWILIO_*` / `SMS_TEST_NUMBER` env vars.
+- Owner steps before/at release, in order: SETUP §9 (test the migrations on a copy + `supabase test db`), add `SMS_CREDENTIALS_KEY` (SETUP §4), custom SMTP + redirect URLs (SETUP §8), `supabase db push` and deploy together, add yourself to `platform_admins` (SETUP §7), recreate Salaam Institute via onboarding and enter its Twilio in Settings → Texting, then run `scripts/delete-archive-school.mjs --with-logins` so old staff/parent emails can be re-added. Then delete the old `TWILIO_*` / `SMS_TEST_NUMBER` env vars.
 - PR muazsad/ControlPad#7 (`juz_tests`): if it merges after the multi-school migrations are applied, its migration must add `school_id`, the composite FK and school-checked policies itself.
 - Known limits: one school per login; one tick loops schools in turn (fine for tens of schools — fan out at hundreds); rotating `SMS_CREDENTIALS_KEY` needs a re-encrypt script (not built); `schedule_groups.teacher_id` isn't tied to the school by a composite FK (RLS and the picker keep it in-school).
 

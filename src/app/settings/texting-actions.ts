@@ -56,6 +56,9 @@ export async function saveTextingSetup(
     authToken,
     phoneNumber: values.phone,
   });
+  // Only a verified number is saved: an unverified one could squat another
+  // school's number, and incoming texts are routed by it.
+  if (!check.ok) return { error: `Not saved: ${check.error}`, success: null };
 
   const now = new Date().toISOString();
   const { error } = await service
@@ -65,7 +68,7 @@ export async function saveTextingSetup(
       twilio_auth_token_enc: tokenEnc,
       twilio_phone_number: values.phone,
       test_number: values.testNumber,
-      verified_at: check.ok ? now : null,
+      verified_at: now,
       updated_at: now,
     })
     .eq("school_id", profile.schoolId);
@@ -77,9 +80,7 @@ export async function saveTextingSetup(
 
   revalidatePath("/settings");
   revalidatePath("/messages");
-  return check.ok
-    ? { error: null, success: "Saved and verified with Twilio." }
-    : { error: `Saved, but not verified: ${check.error}`, success: null };
+  return { error: null, success: "Saved and verified with Twilio." };
 }
 
 export async function setTextingMode(mode: SmsMode): Promise<{ error: string | null }> {

@@ -262,7 +262,7 @@ takes a `schoolId` and every query filters on it. To make that hard to forget:
 - **Settings → Texting** (admin): Account SID, Auth Token, phone number, test number. **Save** encrypts
   the token server-side (AES-256-GCM, key from a new env var `SMS_CREDENTIALS_KEY`, 32 random bytes,
   server-only), then **verifies**: it calls Twilio with the credentials to confirm they work and that the
-  number belongs to that account. It records `verified_at`. The token is never returned to the browser.
+  number belongs to that account. Nothing is saved unless that check passes, so a school can't claim a number it doesn't own. It records `verified_at`, and incoming texts are only routed to verified numbers. The token is never returned to the browser.
   The page shows "•••• last 4" and "Replace".
 - The admin picks `off` / `test` / `live`. `test` works as soon as the setup is verified. `live` is saved
   as *requested* and shows "Waiting for approval" until a platform admin approves (D7).
