@@ -26,7 +26,7 @@ export async function createAnnouncement(
   const profile = await requireRole(["admin"]);
   const fail = (error: string) => ({ ...prev, error, success: null });
 
-  const groups = await getScheduleGroups();
+  const groups = await getScheduleGroups(profile.schoolId);
   const parsed = parseAnnouncementForm(
     {
       message: text(form, "message"),

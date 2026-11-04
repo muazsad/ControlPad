@@ -173,7 +173,7 @@ export default async function StudentDetailPage({
         referencedTable: "grades",
         ascending: false,
       }),
-    supabase.from("settings").select("grade_floor").eq("id", 1).single(),
+    supabase.from("settings").select("grade_floor").eq("school_id", profile.schoolId).single(),
     supabase
       .from("quran_progress")
       .select("date, lines_memorized")
@@ -186,7 +186,7 @@ export default async function StudentDetailPage({
       .select("status")
       .eq("student_id", id)
       .gte("date", cutoff),
-    loadPaceContext(),
+    loadPaceContext(profile.schoolId),
   ]);
   const today = easternDateKey(new Date());
 

@@ -894,10 +894,10 @@ export default async function HomePage() {
     let pendingReports: Awaited<ReturnType<typeof getPendingAbsenceReports>>;
     [adminDailySummary, adminEscalations, pendingReports, staffChecklist] = await Promise.all([
       getAdminDailySummary(today, { now: new Date() }),
-      getEscalationStudents(today),
+      getEscalationStudents(profile.schoolId, today),
       getPendingAbsenceReports(),
       // A checklist failure shouldn't take down the dashboard.
-      getStaffChecklist().catch(() => null),
+      getStaffChecklist(profile.schoolId).catch(() => null),
     ]);
     pendingAbsenceReports = pendingReports.length;
   }

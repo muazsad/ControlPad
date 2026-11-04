@@ -32,7 +32,7 @@ export default async function EditStudentPage({
 
   if (!student) notFound();
   const s = student as Student;
-  const groups = await getScheduleGroups();
+  const groups = await getScheduleGroups(profile.schoolId);
 
   return (
     <AppShell fullName={profile.fullName} role={profile.role}>

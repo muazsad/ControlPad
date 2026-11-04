@@ -131,10 +131,10 @@ type SnapshotAlertTarget = {
  * itself changed, then the pace/missing-work alerts. Sequential, and an alert
  * failure is logged (no PII) but never fails a save that already succeeded.
  */
-async function runSnapshotAlerts(targets: SnapshotAlertTarget[]) {
+async function runSnapshotAlerts(schoolId: string, targets: SnapshotAlertTarget[]) {
   let context: PaceContext | undefined;
   try {
-    context = await loadPaceContext({ service: true });
+    context = await loadPaceContext(schoolId, { service: true });
   } catch (error) {
     console.error(
       "Grade save: could not load pace settings",
@@ -288,7 +288,7 @@ export async function recordGrade(
     .insert(snapshotRow(insert, profile.id, nullable(form, "note")));
   if (error) return { error: error.message };
 
-  await runSnapshotAlerts([
+  await runSnapshotAlerts(profile.schoolId, [
     {
       insert,
       studentName: student ? studentName(student) : "A student",
@@ -396,6 +396,7 @@ export async function saveGradeSweep(
     if (error) return { ...empty, error: error.message };
 
     await runSnapshotAlerts(
+      profile.schoolId,
       plan.toInsert.map((insert) => ({
         insert,
         studentName: labels.get(insert.courseId)?.studentName ?? "A student",

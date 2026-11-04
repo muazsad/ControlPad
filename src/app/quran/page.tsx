@@ -63,7 +63,7 @@ export default async function QuranPage() {
       supabase
         .from("settings")
         .select("quran_inactivity_days")
-        .eq("id", 1)
+        .eq("school_id", profile.schoolId)
         .single(),
     ]);
 
@@ -132,7 +132,7 @@ export default async function QuranPage() {
     supabase
       .from("settings")
       .select("quran_inactivity_days")
-      .eq("id", 1)
+      .eq("school_id", profile.schoolId)
       .single(),
   ]);
 

@@ -127,9 +127,9 @@ export default async function CourseGradesPage({
       )
       .eq("course_id", courseId)
       .order("recorded_at", { ascending: false }),
-    supabase.from("settings").select("grade_floor").eq("id", 1).single(),
+    supabase.from("settings").select("grade_floor").eq("school_id", profile.schoolId).single(),
     // Pace is staff-only: parents can't read settings.
-    canManage ? loadPaceContext() : Promise.resolve(null),
+    canManage ? loadPaceContext(profile.schoolId) : Promise.resolve(null),
   ]);
 
   if (!course) notFound();

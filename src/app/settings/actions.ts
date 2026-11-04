@@ -24,7 +24,7 @@ export async function updateSettings(
   _prevState: SettingsFormState,
   formData: FormData,
 ): Promise<SettingsFormState> {
-  await requireRole(["admin"]);
+  const profile = await requireRole(["admin"]);
 
   const parsed = parseSettingsForm(formData);
   if (!parsed.ok) {
@@ -38,7 +38,7 @@ export async function updateSettings(
       ...parsed.values,
       updated_at: new Date().toISOString(),
     })
-    .eq("id", 1);
+    .eq("school_id", profile.schoolId);
 
   if (error) {
     return { error: error.message, success: null };
@@ -81,7 +81,7 @@ function datesInRange(startDate: string, endDate: string): string[] {
 }
 
 export async function updateWeeklyPattern(formData: FormData) {
-  await requireRole(["admin"]);
+  const profile = await requireRole(["admin"]);
 
   const values = Object.fromEntries(
     WEEKDAY_KEYS.map((day) => [day, formData.get(day) === "on"]),
@@ -90,11 +90,11 @@ export async function updateWeeklyPattern(formData: FormData) {
   const supabase = await createClient();
   const { error } = await supabase.from("school_weekly_patterns").upsert(
     {
-      id: 1,
+      school_id: profile.schoolId,
       ...values,
       updated_at: new Date().toISOString(),
     },
-    { onConflict: "id" },
+    { onConflict: "school_id" },
   );
 
   if (error) throw error;
@@ -177,7 +177,7 @@ export async function saveSpecialDay(
   _prev: SpecialDayFormState,
   formData: FormData,
 ): Promise<SpecialDayFormState> {
-  await requireRole(["admin"]);
+  const profile = await requireRole(["admin"]);
 
   let date: string;
   try {
@@ -206,12 +206,13 @@ export async function saveSpecialDay(
 
   const { error: upsertError } = await supabase.from("school_special_days").upsert(
     {
+      school_id: profile.schoolId,
       date,
       ...parsed.values,
       parents_notified_at: parentsNotifiedAt,
       updated_at: new Date().toISOString(),
     },
-    { onConflict: "date" },
+    { onConflict: "school_id,date" },
   );
   if (upsertError) return failure(upsertError.message);
 
@@ -246,7 +247,7 @@ export async function applySpecialDayRange(
   _prev: SpecialDayFormState,
   formData: FormData,
 ): Promise<SpecialDayFormState> {
-  await requireRole(["admin"]);
+  const profile = await requireRole(["admin"]);
 
   let startDate: string;
   let endDate: string;
@@ -263,6 +264,7 @@ export async function applySpecialDayRange(
 
   const updatedAt = new Date().toISOString();
   const rows = datesInRange(startDate, endDate).map((date) => ({
+    school_id: profile.schoolId,
     date,
     ...parsed.values,
     parents_notified_at: null,
@@ -272,7 +274,7 @@ export async function applySpecialDayRange(
   const supabase = await createClient();
   const { error } = await supabase
     .from("school_special_days")
-    .upsert(rows, { onConflict: "date" });
+    .upsert(rows, { onConflict: "school_id,date" });
 
   if (error) return failure(error.message);
 

@@ -65,7 +65,7 @@ export default async function GradeSweepPage() {
       )
       .eq("enrollment_status", "active"),
     fetchLatestGrades(supabase),
-    loadPaceContext(),
+    loadPaceContext(profile.schoolId),
   ]);
   const today = easternDateKey(now);
   if (error) throw error;

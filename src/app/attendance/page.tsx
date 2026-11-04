@@ -84,13 +84,13 @@ export default async function AttendancePage({
   const supabase = await createClient();
 
   const [groups, calendar, { data: settingsData }] = await Promise.all([
-    getScheduleGroups(),
-    getSchoolCalendar(),
+    getScheduleGroups(profile.schoolId),
+    getSchoolCalendar(profile.schoolId),
     canManage
       ? supabase
           .from("settings")
           .select("school_start, tardy_window_hours")
-          .eq("id", 1)
+          .eq("school_id", profile.schoolId)
           .maybeSingle()
       : Promise.resolve({ data: null }),
   ]);

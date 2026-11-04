@@ -32,8 +32,8 @@ export default async function GradesPage({
   // Pace, staleness and trends are staff-only (parents can't read settings).
   const [metrics, { data: settingsData }, paceContext] = await Promise.all([
     getAllStudentMetrics(),
-    supabase.from("settings").select("grade_floor").eq("id", 1).single(),
-    canManage ? loadPaceContext() : Promise.resolve(null),
+    supabase.from("settings").select("grade_floor").eq("school_id", profile.schoolId).single(),
+    canManage ? loadPaceContext(profile.schoolId) : Promise.resolve(null),
   ]);
 
   const today = easternDateKey(new Date());

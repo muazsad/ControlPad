@@ -26,12 +26,13 @@ function isMissingTableError(error: { code?: string; message?: string } | null) 
   );
 }
 
-async function loadScheduleGroups(supabase: Client): Promise<ScheduleGroup[]> {
+async function loadScheduleGroups(supabase: Client, schoolId: string): Promise<ScheduleGroup[]> {
   const { data, error } = await supabase
     .from("schedule_groups")
     .select(
       "id, name, description, schedule_group_days(weekday, start_time, tardy_grace_minutes, absence_check_time)",
     )
+    .eq("school_id", schoolId)
     .order("name", { ascending: true });
 
   if (error) {
@@ -55,10 +56,10 @@ async function loadScheduleGroups(supabase: Client): Promise<ScheduleGroup[]> {
   }));
 }
 
-export async function getScheduleGroups(): Promise<ScheduleGroup[]> {
-  return loadScheduleGroups(await createClient());
+export async function getScheduleGroups(schoolId: string): Promise<ScheduleGroup[]> {
+  return loadScheduleGroups(await createClient(), schoolId);
 }
 
-export async function getServiceScheduleGroups(): Promise<ScheduleGroup[]> {
-  return loadScheduleGroups(createServiceClient());
+export async function getServiceScheduleGroups(schoolId: string): Promise<ScheduleGroup[]> {
+  return loadScheduleGroups(createServiceClient(), schoolId);
 }

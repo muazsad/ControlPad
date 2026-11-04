@@ -62,10 +62,12 @@ export function specialDayFromRow(row: SpecialDayRow): SpecialDay {
 /** Loads special days, falling back to the original columns before the migration. */
 export async function loadSpecialDayRows(
   supabase: CalendarClient,
+  schoolId: string,
 ): Promise<{ data: SpecialDayRow[] | null; error: SupabaseLikeError | null }> {
   const result = await supabase
     .from("school_special_days")
     .select(SPECIAL_DAY_COLUMNS)
+    .eq("school_id", schoolId)
     .order("date", { ascending: true });
   if (!isMissingColumnError(result.error)) {
     return { data: result.data as SpecialDayRow[] | null, error: result.error };
@@ -73,6 +75,7 @@ export async function loadSpecialDayRows(
   const legacy = await supabase
     .from("school_special_days")
     .select(LEGACY_SPECIAL_DAY_COLUMNS)
+    .eq("school_id", schoolId)
     .order("date", { ascending: true });
   return { data: legacy.data as SpecialDayRow[] | null, error: legacy.error };
 }
@@ -106,18 +109,20 @@ export function isMissingSchoolCalendarTableError(
 
 async function loadSchoolCalendar(
   supabase: CalendarClient,
+  schoolId: string,
 ): Promise<SchoolCalendarConfig> {
   const [weeklyResult, breaksResult, specialDaysResult] = await Promise.all([
     supabase
       .from("school_weekly_patterns")
       .select("sunday, monday, tuesday, wednesday, thursday, friday, saturday")
-      .eq("id", 1)
+      .eq("school_id", schoolId)
       .maybeSingle(),
     supabase
       .from("school_breaks")
       .select("id, name, start_date, end_date")
+      .eq("school_id", schoolId)
       .order("start_date", { ascending: true }),
-    loadSpecialDayRows(supabase),
+    loadSpecialDayRows(supabase, schoolId),
   ]);
 
   const errors = [
@@ -153,10 +158,10 @@ async function loadSchoolCalendar(
   };
 }
 
-export async function getSchoolCalendar(): Promise<SchoolCalendarConfig> {
-  return loadSchoolCalendar(await createClient());
+export async function getSchoolCalendar(schoolId: string): Promise<SchoolCalendarConfig> {
+  return loadSchoolCalendar(await createClient(), schoolId);
 }
 
-export async function getServiceSchoolCalendar(): Promise<SchoolCalendarConfig> {
-  return loadSchoolCalendar(createServiceClient());
+export async function getServiceSchoolCalendar(schoolId: string): Promise<SchoolCalendarConfig> {
+  return loadSchoolCalendar(createServiceClient(), schoolId);
 }

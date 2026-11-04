@@ -102,9 +102,9 @@ export default async function QuranStudentPage({
         .eq("student_id", studentId),
       // Parents can't read settings; revision tones are staff-only.
       isStaff
-        ? supabase.from("settings").select("revision_overdue_school_days").eq("id", 1).single()
+        ? supabase.from("settings").select("revision_overdue_school_days").eq("school_id", profile.schoolId).single()
         : Promise.resolve({ data: null }),
-      getSchoolCalendar(),
+      getSchoolCalendar(profile.schoolId),
     ]);
 
   const entries = (progressData ?? []) as ProgressRow[];

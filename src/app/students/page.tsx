@@ -23,7 +23,7 @@ export default async function StudentsPage() {
   const metrics = await getAllStudentMetrics();
 
   // Staleness is staff-only (parents can't read settings): no badge for them.
-  const paceContext = canManage ? await loadPaceContext() : null;
+  const paceContext = canManage ? await loadPaceContext(profile.schoolId) : null;
   const today = easternDateKey(new Date());
   const students = metrics.map((student) => ({
     ...student,

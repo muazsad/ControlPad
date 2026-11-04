@@ -21,6 +21,7 @@ import { createClient, createServiceClient } from "@/lib/supabase/server";
  * session; pages use the signed-in client (RLS applies).
  */
 export async function loadPaceContext(
+  schoolId: string,
   options: { service?: boolean } = {},
 ): Promise<PaceContext> {
   const supabase = options.service ? createServiceClient() : await createClient();
@@ -31,10 +32,10 @@ export async function loadPaceContext(
       .select(
         "term_start, term_end, pace_gap_threshold, missing_assignments_threshold, stale_grade_school_days, school_start, tardy_window_hours",
       )
-      .eq("id", 1)
+      .eq("school_id", schoolId)
       .single(),
-    options.service ? getServiceSchoolCalendar() : getSchoolCalendar(),
-    options.service ? getServiceScheduleGroups() : getScheduleGroups(),
+    options.service ? getServiceSchoolCalendar(schoolId) : getSchoolCalendar(schoolId),
+    options.service ? getServiceScheduleGroups(schoolId) : getScheduleGroups(schoolId),
   ]);
 
   if (settingsResult.error) throw new Error(settingsResult.error.message);

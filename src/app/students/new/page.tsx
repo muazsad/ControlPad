@@ -12,7 +12,7 @@ import { StudentForm } from "../student-form";
 
 export default async function NewStudentPage() {
   const profile = await requireRole(["admin", "moderator"]);
-  const groups = await getScheduleGroups();
+  const groups = await getScheduleGroups(profile.schoolId);
 
   return (
     <AppShell fullName={profile.fullName} role={profile.role}>

@@ -88,7 +88,7 @@ export default async function AnnouncementsPage() {
 
   const [groups, { data: studentData }, { data: historyData, error: historyError }] =
     await Promise.all([
-      getScheduleGroups(),
+      getScheduleGroups(profile.schoolId),
       supabase
         .from("students")
         .select("schedule_group_id, student_guardians(guardians(phone))")
