@@ -143,6 +143,7 @@ export async function handleInboundSms(
     );
     if (plan.resolvesFollowUpId) await database.resolveFollowUp(plan.resolvesFollowUpId, now);
     messages.push({
+      schoolId: ctx.schoolId,
       recipientPhone: from,
       recipientType: "parent",
       studentId: plan.children.length === 1 ? plan.children[0].id : null,
@@ -161,6 +162,7 @@ export async function handleInboundSms(
       pending_reason: plan.reason,
     });
     messages.push({
+      schoolId: ctx.schoolId,
       recipientPhone: from,
       recipientType: "parent",
       studentId: null,
@@ -183,6 +185,7 @@ export async function handleInboundSms(
     const forward = forwardToAdminMessage({ senderLabel, body: trimReason(body) });
     for (const phone of await database.getAdminPhones()) {
       messages.push({
+        schoolId: ctx.schoolId,
         recipientPhone: phone,
         recipientType: "admin",
         studentId: null,

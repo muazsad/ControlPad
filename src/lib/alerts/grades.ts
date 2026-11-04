@@ -117,6 +117,7 @@ export async function checkLowGradeAlert(
   await Promise.all(
     recipients.map((recipient) =>
       send({
+        schoolId: ctx.schoolId,
         recipientPhone: recipient.phone,
         recipientType: recipient.type,
         studentId: input.studentId,

@@ -238,6 +238,7 @@ export async function checkQuranSlipAlerts(
 
     for (const guardian of student.guardians) {
       messages.push({
+        schoolId: ctx.schoolId,
         recipientPhone: guardian.phone,
         recipientType: "parent",
         studentId: student.id,
@@ -251,6 +252,7 @@ export async function checkQuranSlipAlerts(
     for (const admin of admins) {
       if (!admin.phone) continue;
       messages.push({
+        schoolId: ctx.schoolId,
         recipientPhone: admin.phone,
         recipientType: "admin",
         studentId: student.id,

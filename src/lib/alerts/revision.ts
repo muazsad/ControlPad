@@ -156,6 +156,7 @@ export async function checkRevisionOverdueAlerts(
     for (const recipient of recipients) {
       if (!recipient.phone) continue;
       messages.push({
+        schoolId: ctx.schoolId,
         recipientPhone: recipient.phone,
         recipientType: recipient.type,
         studentId: student.id,

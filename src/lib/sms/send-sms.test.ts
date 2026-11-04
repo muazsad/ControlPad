@@ -12,6 +12,7 @@ import {
 } from "./send-sms";
 
 type NotificationRow = {
+  school_id?: string;
   recipient_phone: string;
   recipient_type: string;
   student_id: string | null;
@@ -62,7 +63,7 @@ class FakeSmsDatabase implements SmsDatabase {
 
   updates: { id: string; patch: Record<string, unknown> }[] = [];
 
-  async updateNotification(id: string, patch: Record<string, unknown>) {
+  async updateNotification(_schoolId: string, id: string, patch: Record<string, unknown>) {
     this.updates.push({ id, patch });
     return { id, ...patch };
   }
@@ -84,6 +85,7 @@ describe("sendSms", () => {
 
     const result = await sendSms(
       {
+        schoolId: "school-1",
         recipientPhone: "+14135550100",
         recipientType: "admin",
         studentId: "student-1",
@@ -110,6 +112,7 @@ describe("sendSms", () => {
 
     const result = await sendSms(
       {
+        schoolId: "school-1",
         recipientPhone: "+14135550100",
         recipientType: "admin",
         studentId: "student-1",
@@ -144,6 +147,7 @@ describe("sendSms", () => {
 
     const result = await sendSms(
       {
+        schoolId: "school-1",
         recipientPhone: "+14135550101",
         recipientType: "parent",
         studentId: "student-1",
@@ -185,6 +189,7 @@ describe("sendSms", () => {
     const send = (key: string) =>
       sendSms(
         {
+          schoolId: "school-1",
           recipientPhone: "+14135550100",
           recipientType: "admin",
           studentId: null,
@@ -200,6 +205,7 @@ describe("sendSms", () => {
   });
 
   const lowGradeAlert = {
+    schoolId: "school-1",
     recipientPhone: "+14135550101",
     recipientType: "parent" as const,
     studentId: "student-1",
@@ -217,6 +223,12 @@ describe("sendSms", () => {
   });
   const okFetch = (async () =>
     new Response(JSON.stringify({ sid: "SM2" }), { status: 201 })) as unknown as typeof fetch;
+
+  it("logs the text in the sending school's notifications", async () => {
+    const database = new FakeSmsDatabase([]);
+    await sendSms(lowGradeAlert, { database, env: twilioEnv, fetch: okFetch });
+    assert.equal(database.rows[0].school_id, "school-1");
+  });
 
   it("does not let an earlier dry run block a real send", async () => {
     const database = new FakeSmsDatabase([priorRow("dry_run", "off")]);

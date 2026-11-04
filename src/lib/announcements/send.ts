@@ -73,6 +73,7 @@ export async function sendAnnouncement(
     const results = await Promise.all(
       phones.map((phone) =>
         send({
+          schoolId: ctx.schoolId,
           recipientPhone: phone,
           recipientType: "parent",
           studentId: null,

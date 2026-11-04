@@ -965,6 +965,7 @@ export async function sendAdminDigest(
   await Promise.all(
     admins.map((admin) =>
       send({
+        schoolId: ctx.schoolId,
         recipientPhone: admin.phone,
         recipientType: "admin",
         studentId: null,

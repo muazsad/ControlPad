@@ -243,7 +243,7 @@ export function escalationMessages(
   plan: EscalationPlan,
   date: string,
   admins: { phone: string | null }[],
-  smsName: string,
+  ctx: SchoolContext,
 ): SendSmsInput[] {
   const messages: SendSmsInput[] = [];
 
@@ -252,6 +252,7 @@ export function escalationMessages(
     for (const admin of admins) {
       if (!admin.phone) continue;
       messages.push({
+        schoolId: ctx.schoolId,
         recipientPhone: admin.phone,
         recipientType: "admin",
         studentId: null,
@@ -264,9 +265,10 @@ export function escalationMessages(
   }
 
   for (const alert of plan.parentAlerts) {
-    const body = parentAbsenceMessage(alert, date, smsName);
+    const body = parentAbsenceMessage(alert, date, ctx.smsName);
     for (const guardian of alert.guardians) {
       messages.push({
+        schoolId: ctx.schoolId,
         recipientPhone: guardian.phone,
         recipientType: "parent",
         studentId: alert.id,
@@ -460,7 +462,7 @@ export async function runAttendanceTick(
     calendar,
     settings,
   });
-  const messages = escalationMessages(plan, date, admins, ctx.smsName);
+  const messages = escalationMessages(plan, date, admins, ctx);
   const results = await Promise.all(messages.map((message) => send(message)));
 
   const sent: Record<string, number> = {};

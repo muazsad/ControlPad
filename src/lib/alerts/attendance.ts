@@ -301,6 +301,7 @@ export async function checkTardyThresholdAlerts(
     const body = `${studentName(student)} has ${student.tardyCount} tardies in their last ${TARDY_WINDOW_SCHOOL_DAYS} school days, meeting the ControlPad threshold of ${settings.tardiesPerWeek}. Please contact Salaam Institute if you have questions.`;
     for (const guardian of student.guardians) {
       messages.push({
+        schoolId: ctx.schoolId,
         recipientPhone: guardian.phone,
         recipientType: "parent",
         studentId: student.id,

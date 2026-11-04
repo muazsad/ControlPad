@@ -31,6 +31,7 @@ export async function sendTestText(): Promise<TestTextState> {
   }
 
   const result = await sendSms({
+    schoolId: profile.schoolId,
     recipientPhone: phone,
     recipientType: "admin",
     studentId: null,

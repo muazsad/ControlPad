@@ -20,6 +20,8 @@ export type NotificationTrigger =
 export type RecipientType = "admin" | "parent";
 
 export type SendSmsInput = {
+  /** The school sending the text; its row goes in that school's log. */
+  schoolId: string;
   recipientPhone: string;
   recipientType: RecipientType;
   studentId: string | null;
@@ -123,6 +125,7 @@ export type SmsResult =
 export type SmsDatabase = {
   /** Matching notifications created since `since`, newest first. */
   findRecentNotifications(input: {
+    schoolId: string;
     recipientPhone: string;
     studentId: string | null;
     triggerType: NotificationTrigger;
@@ -130,6 +133,7 @@ export type SmsDatabase = {
     dedupeKey?: string | null;
   }): Promise<RecentNotification[]>;
   insertNotification(row: {
+    school_id: string;
     recipient_phone: string;
     recipient_type: RecipientType;
     student_id: string | null;
@@ -143,6 +147,7 @@ export type SmsDatabase = {
     sent_at?: string | null;
   }): Promise<unknown>;
   updateNotification(
+    schoolId: string,
     id: string,
     patch: {
       status: "sent" | "failed";
@@ -234,6 +239,7 @@ export function createSupabaseSmsDatabase(): SmsDatabase {
 
   return {
     async findRecentNotifications({
+      schoolId,
       recipientPhone,
       studentId,
       triggerType,
@@ -243,6 +249,7 @@ export function createSupabaseSmsDatabase(): SmsDatabase {
       let query = supabase
         .from("notifications")
         .select("id, status, delivery_mode")
+        .eq("school_id", schoolId)
         .eq("recipient_phone", recipientPhone)
         .gte("created_at", since.toISOString())
         .order("created_at", { ascending: false })
@@ -263,6 +270,7 @@ export function createSupabaseSmsDatabase(): SmsDatabase {
       return (data ?? []) as RecentNotification[];
     },
     async insertNotification(row) {
+      // tenant-scope-ok: row.school_id is required by SmsDatabase.insertNotification
       const { data, error } = await supabase
         .from("notifications")
         .insert(row)
@@ -271,10 +279,11 @@ export function createSupabaseSmsDatabase(): SmsDatabase {
       if (error) throw new Error(error.message);
       return data;
     },
-    async updateNotification(id, patch) {
+    async updateNotification(schoolId, id, patch) {
       const { data, error } = await supabase
         .from("notifications")
         .update(patch)
+        .eq("school_id", schoolId)
         .eq("id", id)
         .select("id, status, twilio_sid, error")
         .single();
@@ -297,6 +306,7 @@ export async function sendSms(
   const config = getSmsConfig(env);
 
   const recent = await database.findRecentNotifications({
+    schoolId: input.schoolId,
     recipientPhone: input.recipientPhone,
     studentId: input.studentId,
     triggerType: input.triggerType,
@@ -319,6 +329,7 @@ export async function sendSms(
   const twilioEnv = config.mode === "off" ? null : config.twilio;
 
   const notification = await database.insertNotification({
+    school_id: input.schoolId,
     recipient_phone: input.recipientPhone,
     recipient_type: input.recipientType,
     student_id: input.studentId,
@@ -372,7 +383,7 @@ export async function sendSms(
       const message =
         payload.message ?? `Twilio request failed with ${response.status}`;
       if (notificationId) {
-        const updated = await database.updateNotification(notificationId, {
+        const updated = await database.updateNotification(input.schoolId, notificationId, {
           status: "failed",
           error: message,
         });
@@ -382,7 +393,7 @@ export async function sendSms(
     }
 
     if (notificationId) {
-      const updated = await database.updateNotification(notificationId, {
+      const updated = await database.updateNotification(input.schoolId, notificationId, {
         status: "sent",
         twilio_sid: payload.sid ?? null,
         error: null,
@@ -395,7 +406,7 @@ export async function sendSms(
   } catch (error) {
     const message = error instanceof Error ? error.message : "SMS send failed.";
     if (notificationId) {
-      const updated = await database.updateNotification(notificationId, {
+      const updated = await database.updateNotification(input.schoolId, notificationId, {
         status: "failed",
         error: message,
       });

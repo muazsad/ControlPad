@@ -165,6 +165,7 @@ export async function checkPaceAlerts(
     for (const r of recipients) {
       sends.push(
         send({
+          schoolId: ctx.schoolId,
           recipientPhone: r.phone,
           recipientType: r.type,
           studentId: input.studentId,
@@ -185,6 +186,7 @@ export async function checkPaceAlerts(
     for (const r of recipients) {
       sends.push(
         send({
+          schoolId: ctx.schoolId,
           recipientPhone: r.phone,
           recipientType: r.type,
           studentId: input.studentId,
