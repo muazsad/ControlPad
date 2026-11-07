@@ -158,7 +158,9 @@ create table quran_progress (
   recorded_by       uuid references auth.users(id),
   recorded_at       timestamptz not null default now(),
   lesson_type       quran_lesson_type not null default 'sabaq', -- Oct 16 2026; only sabaq is memorization
-  juz               smallint check (juz between 1 and 30)     -- set on sabaq_para / dhor rows
+  juz               smallint check (juz between 1 and 30),    -- set on sabaq_para / dhor rows
+  from_page         smallint,  -- Nov 7 2026: pages within the juz (1–30), required by the app
+  to_page           smallint   -- on new sabaq_para / dhor rows; null on older rows and sabaq
 );
 
 -- Juz a student has memorized (Oct 16 2026). Revising a juz upserts it here.

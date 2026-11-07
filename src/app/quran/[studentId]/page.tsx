@@ -22,7 +22,7 @@ import {
   type QuranPattern,
 } from "@/lib/people/quran-progress";
 import { createClient } from "@/lib/supabase/server";
-import { isRevision, isSabaq, QURAN_LESSON_LABELS, lessonTypeOf } from "@/lib/quran/lessons";
+import { formatJuzPages, isRevision, isSabaq, QURAN_LESSON_LABELS, lessonTypeOf } from "@/lib/quran/lessons";
 import {
   DEFAULT_REVISION_OVERDUE_SCHOOL_DAYS,
   juzRevisionStatuses,
@@ -45,6 +45,8 @@ type ProgressRow = {
   recorded_at: string;
   lesson_type: string | null;
   juz: number | null;
+  from_page: number | null;
+  to_page: number | null;
 };
 
 const PATTERN_LABEL: Record<QuranPattern, string> = {
@@ -97,7 +99,7 @@ export default async function QuranStudentPage({
       supabase
         .from("quran_progress")
         .select(
-          "id, date, surah, from_ayah, to_ayah, lines_memorized, note, recorded_at, lesson_type, juz",
+          "id, date, surah, from_ayah, to_ayah, lines_memorized, note, recorded_at, lesson_type, juz, from_page, to_page",
         )
         .eq("student_id", studentId)
         .order("date", { ascending: false })
@@ -353,7 +355,9 @@ export default async function QuranStudentPage({
                   cell: (row) => (
                     <span className="text-sm">
                       {QURAN_LESSON_LABELS[lessonTypeOf(row)]}
-                      {row.juz ? ` · Juz ${row.juz}` : ""}
+                      {row.juz
+                        ? ` · ${formatJuzPages({ juz: row.juz, fromPage: row.from_page, toPage: row.to_page })}`
+                        : ""}
                     </span>
                   ),
                 },

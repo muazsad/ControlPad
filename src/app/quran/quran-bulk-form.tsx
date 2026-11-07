@@ -12,7 +12,7 @@ import { InlineError } from "@/components/controlpad/inline-error";
 import { StatusBadge } from "@/components/controlpad/status-badge";
 import { cn } from "@/lib/utils";
 import { studentName, type Student } from "@/lib/people/people";
-import { parseJuzList } from "@/lib/quran/lessons";
+import { formatJuzPages, parseJuzPages } from "@/lib/quran/lessons";
 import { logQuranLessons, type QuranBulkState } from "./actions";
 
 type LatestEntry = {
@@ -71,7 +71,8 @@ export function QuranBulkForm({
   );
   const dateRef = useRef<HTMLInputElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
-  // Typed dhor juz per student, so they can be shown as chips.
+  // Typed sabaq para / dhor sections per student, so they can be shown as chips.
+  const [para, setPara] = useState<Record<string, string>>({});
   const [dhor, setDhor] = useState<Record<string, string>>({});
   const latestMap = new Map(latestEntries.map((e) => [e.student_id, e]));
 
@@ -89,6 +90,7 @@ export function QuranBulkForm({
       formRef.current?.reset();
       if (dateRef.current && keepDate) dateRef.current.value = keepDate;
       // eslint-disable-next-line react-hooks/set-state-in-effect
+      setPara({});
       setDhor({});
     }
   }, [state]);
@@ -206,7 +208,7 @@ export function QuranBulkForm({
               <input type="hidden" name={`name_${student.id}`} value={studentName(student)} />
 
               {/* Sabaq | Sabaq para | Dhor */}
-              <div className="grid gap-2 sm:grid-cols-[minmax(120px,160px)_minmax(110px,140px)_minmax(160px,1fr)]">
+              <div className="grid gap-2 sm:grid-cols-[minmax(110px,140px)_minmax(140px,180px)_minmax(180px,1fr)]">
                 <div className="space-y-1">
                   <label className="text-xs text-muted-foreground" htmlFor={`lines_${student.id}`}>
                     Sabaq lines
@@ -223,28 +225,31 @@ export function QuranBulkForm({
                 </div>
                 <div className="space-y-1">
                   <label className="text-xs text-muted-foreground" htmlFor={`para_${student.id}`}>
-                    Sabaq para juz
+                    Sabaq para (juz: pages)
                   </label>
                   <Input
                     id={`para_${student.id}`}
                     name={`para_${student.id}`}
                     data-nav="1"
-                    placeholder="1–30"
-                    inputMode="numeric"
+                    placeholder="e.g. 3: 1-5"
                     className="h-8 text-sm"
                     autoComplete="off"
+                    value={para[student.id] ?? ""}
+                    onChange={(event) =>
+                      setPara((prev) => ({ ...prev, [student.id]: event.target.value }))
+                    }
                   />
+                  <SectionChips value={para[student.id] ?? ""} />
                 </div>
                 <div className="space-y-1">
                   <label className="text-xs text-muted-foreground" htmlFor={`dhor_${student.id}`}>
-                    Dhor juz
+                    Dhor (juz: pages)
                   </label>
                   <Input
                     id={`dhor_${student.id}`}
                     name={`dhor_${student.id}`}
                     data-nav="1"
-                    placeholder="e.g. 3, 7"
-                    inputMode="numeric"
+                    placeholder="e.g. 3: 1-5, 7: 10-20"
                     className="h-8 text-sm"
                     autoComplete="off"
                     value={dhor[student.id] ?? ""}
@@ -252,7 +257,7 @@ export function QuranBulkForm({
                       setDhor((prev) => ({ ...prev, [student.id]: event.target.value }))
                     }
                   />
-                  <DhorChips value={dhor[student.id] ?? ""} />
+                  <SectionChips value={dhor[student.id] ?? ""} />
                 </div>
               </div>
             </div>
@@ -265,21 +270,21 @@ export function QuranBulkForm({
   );
 }
 
-/** Typed dhor juz shown as chips (or a hint when the text isn't valid yet). */
-function DhorChips({ value }: { value: string }) {
+/** Typed revision sections shown as chips (or a hint when the text isn't valid yet). */
+function SectionChips({ value }: { value: string }) {
   if (value.trim() === "") return null;
-  const parsed = parseJuzList(value);
+  const parsed = parseJuzPages(value);
   if (!parsed.ok) {
     return <p className="text-xs text-status-danger">{parsed.error}</p>;
   }
   return (
     <div className="flex flex-wrap gap-1">
-      {parsed.juz.map((juz) => (
+      {parsed.entries.map((entry) => (
         <span
-          key={juz}
+          key={`${entry.juz}:${entry.fromPage}`}
           className="rounded-md border bg-muted px-1.5 py-0.5 text-xs font-medium tabular-nums"
         >
-          Juz {juz}
+          {formatJuzPages(entry)}
         </span>
       ))}
     </div>
