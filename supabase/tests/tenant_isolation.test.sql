@@ -1,7 +1,7 @@
 -- Behavioural tenant isolation (spec §5). Run: supabase test db  (needs Docker).
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(24);
+select plan(25);
 
 -- Two schools; admin, moderator and parent in each. Fixed ids for readability.
 insert into auth.users (id, email) values
@@ -117,6 +117,18 @@ select pg_temp.as_user('c0000000-0000-0000-0000-00000000000a');
 select is((select count(*) from students)::int, 0, 'archived school data is invisible');
 select is(public.user_role()::text, null::text, 'archived user has no role');
 select is((select count(*) from profiles)::int, 1, 'archived user still reads own profile');
+
+-- Two foreign keys between the same pair of tables make PostgREST refuse
+-- embeds like attendance → students(...). Only the composite key may remain.
+select is(
+  (select count(*)::int from (
+     select conrelid, confrelid from pg_constraint
+     where contype = 'f' and connamespace = 'public'::regnamespace
+     group by conrelid, confrelid, conkey[1] having count(*) > 1
+   ) dupes),
+  0,
+  'no table has two foreign keys to the same parent on the same column'
+);
 
 select * from finish();
 rollback;
