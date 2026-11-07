@@ -84,6 +84,7 @@ Guiding principle: **catch problems early and notify the right person automatica
 - Calendar-aware: breaks and no-school days don't count as inactivity.
 - **Alerts (daily, from the 10-minute tick at `QURAN_CHECK_TIME`, skipped on no-school days):** no new memorization (sabaq) in `quran_inactivity_days` school days → `quran_slip` to **parent + admin**; memorized juz overdue for revision → `revision_overdue` to **parent + admin**, one text per student listing the juz (capped: "Juz 3, 7 and 2 more"), deduped per student per ISO week (`lib/alerts/revision.ts`).
 - Parents see memorized lines (sabaq only) and the last revision date on `/quran`, and the juz grid (without revision colours) on their child's page.
+- **Juz test** (`juz_tests`, `lib/quran/juz-test.ts`): staff click "Start juz test" (juz + date) on `/quran/[studentId]`, then "Finish" when done; finishing marks that juz memorized (as of the finish date, if not already marked). While a test is open the student isn't required to do sabaq, sabaq para or dhor: no `quran_slip` / `revision_overdue` texts, left out of the dashboard/digest Quran lists (shown under "On juz test" instead), no Quran/revision escalation, not a Quran gap on the staff checklist, and the Quran score is frozen as of the start date. Clocks are not reset on finish: if the student still has no sabaq afterwards, alerts resume normally.
 
 ### 3.5 Tuition
 - Monthly fee per student; admin toggles each month paid / unpaid. Parents see the current month only.
@@ -319,6 +320,7 @@ ControlPad holds **children's educational records and family phone numbers**:
 - Oct 11: staff checklist on the dashboard — responsible teacher per schedule group; today's attendance + Quran gaps per teacher
 - Oct 11: parent-reported absences by text — inbound Twilio webhook, absence reports with admin approval, forwarding of other parent texts, simulator on /messages (§3.6a)
 - Oct 10: special days — more types (schedule change, no GCVS, field trip, other), per-day options (students expected, new times, parent attendance texts on/off), group scope, and a parent text (auto 6pm the evening before and/or "Text parents now")
+- Nov 3: Juz test — start/finish per student; pauses Quran and revision requirements while open, marks the juz memorized on finish (§3.4)
 - Oct 16: Hifz revision — sabaq / sabaq para / dhor lesson types (only sabaq counts as memorization), memorized-juz grid, revision-overdue texts, "sabaq without revision" flag, dashboard/digest/escalation (§3.4)
 - Oct 15: stale-data flags (staff only) and a "Dropping fastest" grade-trend view, plus dashboard cards and a digest line (§3.2, §3.7)
 - Oct 12: course pace — GCVS % complete and missing assignments on every snapshot, expected-pace calculation from the student's own school days, pace/missing alerts (parents + admin), dashboard and digest items, escalation signals, pace chart and bars (§3.2)

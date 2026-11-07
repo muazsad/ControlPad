@@ -1,7 +1,15 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { isRevision, lessonTypeOf, parseJuzList, sabaqOnly, sabaqTotalLines } from "./lessons";
+import {
+  formatJuzPages,
+  isRevision,
+  lessonTypeOf,
+  parseJuzList,
+  parseJuzPages,
+  sabaqOnly,
+  sabaqTotalLines,
+} from "./lessons";
 
 describe("sabaq-only totals", () => {
   const entries = [
@@ -34,5 +42,48 @@ describe("parseJuzList", () => {
     assert.equal(parseJuzList("31").ok, false);
     assert.equal(parseJuzList("3, x").ok, false);
     assert.equal(parseJuzList("2.5").ok, false);
+  });
+});
+
+describe("parseJuzPages", () => {
+  it("parses juz with page ranges or single pages", () => {
+    assert.deepEqual(parseJuzPages("3: 1-5"), {
+      ok: true,
+      entries: [{ juz: 3, fromPage: 1, toPage: 5 }],
+    });
+    assert.deepEqual(parseJuzPages(" 7:10–20 , 3 : 4 "), {
+      ok: true,
+      entries: [
+        { juz: 3, fromPage: 4, toPage: 4 },
+        { juz: 7, fromPage: 10, toPage: 20 },
+      ],
+    });
+    assert.deepEqual(parseJuzPages(""), { ok: true, entries: [] });
+  });
+
+  it("keeps two sections of the same juz", () => {
+    const result = parseJuzPages("3: 10-12, 3: 1-5");
+    assert.deepEqual(result.ok && result.entries.map((e) => e.fromPage), [1, 10]);
+  });
+
+  it("requires pages for every juz", () => {
+    const result = parseJuzPages("3");
+    assert.equal(result.ok, false);
+    assert.match(!result.ok ? result.error : "", /pages for juz 3/);
+    assert.equal(parseJuzPages("3: 1-5, 7").ok, false);
+  });
+
+  it("rejects bad juz, bad pages and backwards ranges", () => {
+    assert.equal(parseJuzPages("31: 1-5").ok, false);
+    assert.equal(parseJuzPages("3: 0-5").ok, false);
+    assert.equal(parseJuzPages("3: 1-31").ok, false);
+    assert.equal(parseJuzPages("3: 9-2").ok, false);
+    assert.equal(parseJuzPages("3: x").ok, false);
+  });
+
+  it("formats a section for display", () => {
+    assert.equal(formatJuzPages({ juz: 3, fromPage: 1, toPage: 5 }), "Juz 3 · p. 1–5");
+    assert.equal(formatJuzPages({ juz: 3, fromPage: 4, toPage: 4 }), "Juz 3 · p. 4");
+    assert.equal(formatJuzPages({ juz: 3, fromPage: null, toPage: null }), "Juz 3");
   });
 });

@@ -86,6 +86,14 @@ export default async function QuranPage() {
           .order("recorded_at", { ascending: false })
       : { data: [] };
 
+    const { data: juzTestData } = await supabase
+      .from("juz_tests")
+      .select("student_id, juz")
+      .is("finished_on", null);
+    const juzTests = Object.fromEntries(
+      ((juzTestData ?? []) as { student_id: string; juz: number }[]).map((row) => [row.student_id, row.juz]),
+    );
+
     // Keep only the latest row per student.
     const latestMap = new Map<string, LatestEntry>();
     for (const row of (latestData ?? []) as LatestEntry[]) {
@@ -115,6 +123,7 @@ export default async function QuranPage() {
                 latestEntries={latestEntries}
                 initialDate={todayIso()}
                 quranInactivityDays={quranInactivityDays}
+                juzTests={juzTests}
               />
             )}
           </Card>

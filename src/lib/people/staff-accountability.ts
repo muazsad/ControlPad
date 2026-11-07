@@ -34,6 +34,8 @@ export type AccountabilityStudent = {
   attendance: AccountabilityAttendance | null;
   quranLogged: boolean;
   reportedAbsent: boolean;
+  /** Open juz test: no Quran lesson is expected. */
+  onJuzTest?: boolean;
 };
 
 export type StaffMember = { id: string; name: string };
@@ -117,7 +119,7 @@ export function buildStaffChecklist(input: {
       row.attendance.notDueYet += 1;
     }
 
-    if (student.attendance !== "absent" && student.attendance !== "excused") {
+    if (student.attendance !== "absent" && student.attendance !== "excused" && !student.onJuzTest) {
       row.quran.expected += 1;
       if (student.quranLogged) row.quran.logged += 1;
       else row.quran.missing.push(item);

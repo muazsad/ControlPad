@@ -4,6 +4,7 @@ import { computeOverduePaymentCycles } from "@/lib/alerts/payment-overdue";
 import { evaluateQuranInactivity } from "@/lib/alerts/quran";
 import { bySeverity } from "@/lib/alerts/admin-dashboard-severity";
 import { studentGradeHealth } from "@/lib/grades/grade-health";
+import { studentsOnJuzTest, type JuzTestRow } from "@/lib/quran/juz-test";
 import { sabaqOnly } from "@/lib/quran/lessons";
 import {
   juzRevisionStatuses,
@@ -152,6 +153,14 @@ export type SabaqWithoutRevisionIssue = {
   tone: "warning";
 };
 
+/** Open juz test: Quran and revision flags are paused for this student. */
+export type JuzTestIssue = {
+  studentId: string;
+  studentName: string;
+  juz: number;
+  startedOn: string;
+};
+
 export type AdminDailySummary = {
   date: string;
   schoolDayType: CalendarDayType;
@@ -168,6 +177,8 @@ export type AdminDailySummary = {
   quranSlippage: QuranSlipIssue[];
   revisionOverdue: RevisionOverdueIssue[];
   sabaqWithoutRevision: SabaqWithoutRevisionIssue[];
+  /** Informational, not an issue: excluded from the Quran / revision lists. */
+  onJuzTest: JuzTestIssue[];
   overduePayments: OverduePaymentIssue[];
 };
 
@@ -656,6 +667,7 @@ export function createSupabaseAdminDigestDatabase(ctx: SchoolContext): AdminDige
         quranResult,
         paidPaymentsResult,
         memorizedResult,
+        juzTestsResult,
       ] = await Promise.all([
         // Not gated on the school-wide calendar: grouped students may attend
         // on days the rest of the school is off (e.g. a Quran-only Friday).
@@ -690,6 +702,11 @@ export function createSupabaseAdminDigestDatabase(ctx: SchoolContext): AdminDige
           .eq("period_month", periodMonthFor(date)),
         supabase.from("student_memorized_juz").select("student_id, juz, marked_at")
           .eq("school_id", ctx.schoolId),
+        supabase
+          .from("juz_tests")
+          .select("student_id, juz, started_on, finished_on")
+          .eq("school_id", ctx.schoolId)
+          .is("finished_on", null),
       ]);
 
       if (attendanceResult.error) throw new Error(attendanceResult.error.message);
@@ -697,6 +714,7 @@ export function createSupabaseAdminDigestDatabase(ctx: SchoolContext): AdminDige
       if (studentsResult.error) throw new Error(studentsResult.error.message);
       if (quranResult.error) throw new Error(quranResult.error.message);
       if (memorizedResult.error) throw new Error(memorizedResult.error.message);
+      if (juzTestsResult.error) throw new Error(juzTestsResult.error.message);
       if (paidPaymentsResult.error) {
         throw new Error(paidPaymentsResult.error.message);
       }
@@ -789,8 +807,20 @@ export function createSupabaseAdminDigestDatabase(ctx: SchoolContext): AdminDige
         }
       }
 
+      // Students on an open juz test aren't expected to do sabaq or revision.
+      const onTest = studentsOnJuzTest((juzTestsResult.data ?? []) as JuzTestRow[], date);
+      const quranStudents = students.filter((student) => !onTest.has(student.id));
+      const onJuzTest: JuzTestIssue[] = students
+        .flatMap((student) => {
+          const test = onTest.get(student.id);
+          return test
+            ? [{ studentId: student.id, studentName: studentName(student), juz: test.juz, startedOn: test.startedOn }]
+            : [];
+        })
+        .sort((a, b) => a.startedOn.localeCompare(b.startedOn));
+
       const quranSlippage = schoolIsInSession
-        ? students
+        ? quranStudents
             .filter((student) => {
               const latest = latestQuranDate.get(student.id);
               return evaluateQuranInactivity({
@@ -822,7 +852,7 @@ export function createSupabaseAdminDigestDatabase(ctx: SchoolContext): AdminDige
           juz: number;
           marked_at: string;
         }[],
-        students: students.map((student) => ({ id: student.id, name: studentName(student) })),
+        students: quranStudents.map((student) => ({ id: student.id, name: studentName(student) })),
         thresholdSchoolDays: settings.revisionOverdueSchoolDays,
         calendar,
         today: date,
@@ -872,6 +902,7 @@ export function createSupabaseAdminDigestDatabase(ctx: SchoolContext): AdminDige
         quranSlippage,
         revisionOverdue,
         sabaqWithoutRevision,
+        onJuzTest,
         overduePayments,
       };
     },

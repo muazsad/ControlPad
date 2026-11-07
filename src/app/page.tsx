@@ -648,6 +648,35 @@ function AdminDashboard({
           ))}
         </IssueGroup>
 
+        {summary.onJuzTest.length > 0 ? (
+          <IssueGroup
+            title="On juz test"
+            href="/quran"
+            empty=""
+            hasItems
+          >
+            {summary.onJuzTest.map((issue) => (
+              <div
+                key={`juz-test-${issue.studentId}`}
+                className="flex items-center justify-between gap-3 border-b py-2 last:border-0"
+              >
+                <div>
+                  <Link
+                    href={`/quran/${issue.studentId}`}
+                    className="text-sm font-medium hover:underline"
+                  >
+                    {issue.studentName}
+                  </Link>
+                  <p className="text-xs text-muted-foreground">
+                    Since {issue.startedOn} · Quran alerts paused
+                  </p>
+                </div>
+                <StatusBadge status={`Juz ${issue.juz}`} tone="neutral" />
+              </div>
+            ))}
+          </IssueGroup>
+        ) : null}
+
         <IssueGroup
           title="Tuition"
           href="/tuition"

@@ -1,3 +1,4 @@
+import { activeJuzTest, type ActiveJuzTest, type JuzTestRow } from "@/lib/quran/juz-test";
 import { sabaqOnly } from "@/lib/quran/lessons";
 import { createClient } from "@/lib/supabase/server";
 import { studentName, type EnrollmentStatus } from "@/lib/people/people";
@@ -44,6 +45,7 @@ type RawStudent = {
   courses: RawCourse[];
   quran_progress: RawQuranEntry[];
   attendance: RawAttendance[];
+  juz_tests: JuzTestRow[] | null;
 };
 
 // ── Public shape ─────────────────────────────────────────────────────────────
@@ -75,6 +77,8 @@ export type StudentMetricsRow = {
   /** Latest grade value per course (one entry per course that has ≥1 grade). */
   latestGradeValues: number[];
   quranEntries: RawQuranEntry[];
+  /** Open juz test; the Quran score is frozen at its start date. */
+  juzTest: ActiveJuzTest | null;
   attendanceRecords: Pick<RawAttendance, "status">[];
   // Precomputed
   gradeScore: number | null;
@@ -87,6 +91,12 @@ export type StudentMetricsRow = {
 };
 
 // ── Helper ───────────────────────────────────────────────────────────────────
+
+function shiftDate(isoDate: string, days: number): string {
+  const d = new Date(`${isoDate}T00:00:00.000Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
 
 /** Pick the grade with the highest recorded_at for a single course. */
 function latestGradeRow(grades: RawGrade[]): RawGrade | null {
@@ -126,7 +136,8 @@ export async function getAllStudentMetrics(): Promise<StudentMetricsRow[]> {
       `id, first_name, last_name, grade_level, enrollment_status, schedule_group_id,
        courses(id, name, created_at, start_date, end_date, grades(grade_value, recorded_at, percent_complete, missing_assignments)),
        quran_progress(date, lines_memorized, lesson_type),
-       attendance(status, date)`,
+       attendance(status, date),
+       juz_tests(juz, started_on, finished_on)`,
     )
     .order("last_name", { ascending: true });
 
@@ -137,14 +148,19 @@ export async function getAllStudentMetrics(): Promise<StudentMetricsRow[]> {
       .map((c) => latestGradeValue(c.grades))
       .filter((v): v is number => v !== null);
 
-    // Only sabaq (new memorization) counts toward the Quran score.
-    const quranEntries = sabaqOnly(s.quran_progress).filter((e) => e.date >= cutoff);
+    // Only sabaq (new memorization) counts toward the Quran score. On a juz
+    // test sabaq pauses, so the score is frozen as of the test's start.
+    const juzTest = activeJuzTest(s.juz_tests, new Date().toISOString().slice(0, 10));
+    const quranCutoff = juzTest ? shiftDate(juzTest.startedOn, -WINDOW_DAYS) : cutoff;
+    const quranEntries = sabaqOnly(s.quran_progress).filter(
+      (e) => e.date >= quranCutoff && (!juzTest || e.date < juzTest.startedOn),
+    );
     const attendanceRecords = s.attendance
       .filter((a) => a.date >= cutoff)
       .map(({ status }) => ({ status }));
 
     const gradeScore = avgGradeScore(latestGradeValues);
-    const quranResult = quranScore(quranEntries);
+    const quranResult = quranScore(quranEntries, juzTest?.startedOn);
     const attRate = attendanceRate(attendanceRecords);
     const globalResult = globalPerformance({
       gradeScore,
@@ -182,6 +198,7 @@ export async function getAllStudentMetrics(): Promise<StudentMetricsRow[]> {
       }),
       latestGradeValues,
       quranEntries,
+      juzTest,
       attendanceRecords,
       gradeScore,
       quranResult,

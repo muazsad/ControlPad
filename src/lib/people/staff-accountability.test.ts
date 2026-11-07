@@ -98,6 +98,15 @@ describe("buildStaffChecklist", () => {
     assert.equal(ali.complete, false);
   });
 
+  it("doesn't expect a Quran lesson from a student on a juz test", () => {
+    const [row] = build(
+      [{ ...student("a", "full", "present"), onJuzTest: true }, student("b", "full", "present", true)],
+      "12:00",
+    );
+    assert.equal(row.quran.expected, 1);
+    assert.deepEqual(row.quran.missing, []);
+  });
+
   it("doesn't count unmarked students before their tardy cutoff", () => {
     const [mariam] = build([student("q", "quran", null)], "16:05");
     assert.equal(mariam.attendance.missing.length, 0);

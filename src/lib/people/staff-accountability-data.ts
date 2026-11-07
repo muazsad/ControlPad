@@ -1,6 +1,7 @@
 // Loads today's staff checklist for the admin dashboard (RLS: admin reads all).
 
 import { schoolClock } from "@/lib/alerts/attendance-escalation";
+import { activeJuzTest, type JuzTestRow } from "@/lib/quran/juz-test";
 import { getSchoolCalendar } from "@/lib/schedule/calendar-data";
 import { getScheduleGroups } from "@/lib/schedule/schedule-groups-data";
 import { createClient } from "@/lib/supabase/server";
@@ -22,6 +23,7 @@ type StudentRow = {
   schedule_group_id: string | null;
   attendance: { status: AccountabilityAttendance; date: string }[] | null;
   quran_progress: { date: string }[] | null;
+  juz_tests: JuzTestRow[] | null;
 };
 
 /** group id → teacher id. Empty before the teacher migration is applied. */
@@ -70,7 +72,7 @@ export async function getStaffChecklist(
       supabase
         .from("students")
         .select(
-          "id, first_name, last_name, schedule_group_id, attendance(status, date), quran_progress(date)",
+          "id, first_name, last_name, schedule_group_id, attendance(status, date), quran_progress(date), juz_tests(juz, started_on, finished_on)",
         )
         .eq("enrollment_status", "active")
         .eq("attendance.date", date)
@@ -97,6 +99,7 @@ export async function getStaffChecklist(
       attendance: (row.attendance ?? []).find((record) => record.date === date)?.status ?? null,
       quranLogged: (row.quran_progress ?? []).some((record) => record.date === date),
       reportedAbsent: reported.has(row.id),
+      onJuzTest: activeJuzTest(row.juz_tests, date) !== null,
     }),
   );
 

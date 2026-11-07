@@ -22,7 +22,7 @@ import {
   type QuranPattern,
 } from "@/lib/people/quran-progress";
 import { createClient } from "@/lib/supabase/server";
-import { isRevision, isSabaq, QURAN_LESSON_LABELS, lessonTypeOf } from "@/lib/quran/lessons";
+import { formatJuzPages, isRevision, isSabaq, QURAN_LESSON_LABELS, lessonTypeOf } from "@/lib/quran/lessons";
 import {
   DEFAULT_REVISION_OVERDUE_SCHOOL_DAYS,
   juzRevisionStatuses,
@@ -31,6 +31,7 @@ import {
 import { getSchoolCalendar } from "@/lib/schedule/calendar-data";
 import { todayInSchoolTimeZone } from "@/lib/alerts/admin-digest";
 import { JuzGrid, type JuzCell } from "./juz-grid";
+import { JuzTestPanel, type JuzTestView } from "./juz-test-panel";
 import { QuranProgressChart, type QuranChartPoint } from "./quran-progress-chart";
 
 type ProgressRow = {
@@ -44,6 +45,8 @@ type ProgressRow = {
   recorded_at: string;
   lesson_type: string | null;
   juz: number | null;
+  from_page: number | null;
+  to_page: number | null;
 };
 
 const PATTERN_LABEL: Record<QuranPattern, string> = {
@@ -86,12 +89,17 @@ export default async function QuranStudentPage({
 
   const isStaff = profile.role === "admin" || profile.role === "moderator";
 
-  const [{ data: progressData }, { data: memorizedData }, { data: settingsData }, calendar] =
-    await Promise.all([
+  const [
+    { data: progressData },
+    { data: memorizedData },
+    { data: settingsData },
+    calendar,
+    { data: juzTestData },
+  ] = await Promise.all([
       supabase
         .from("quran_progress")
         .select(
-          "id, date, surah, from_ayah, to_ayah, lines_memorized, note, recorded_at, lesson_type, juz",
+          "id, date, surah, from_ayah, to_ayah, lines_memorized, note, recorded_at, lesson_type, juz, from_page, to_page",
         )
         .eq("student_id", studentId)
         .order("date", { ascending: false })
@@ -105,6 +113,11 @@ export default async function QuranStudentPage({
         ? supabase.from("settings").select("revision_overdue_school_days").eq("school_id", profile.schoolId).single()
         : Promise.resolve({ data: null }),
       getSchoolCalendar(profile.schoolId),
+      supabase
+        .from("juz_tests")
+        .select("id, juz, started_on, finished_on")
+        .eq("student_id", studentId)
+        .order("started_on", { ascending: false }),
     ]);
 
   const entries = (progressData ?? []) as ProgressRow[];
@@ -170,6 +183,15 @@ export default async function QuranStudentPage({
     };
   });
   const latestRevision = lastRevisionDate(entries);
+
+  const juzTests: JuzTestView[] = (
+    (juzTestData ?? []) as { id: string; juz: number; started_on: string; finished_on: string | null }[]
+  ).map((row) => ({ id: row.id, juz: row.juz, startedOn: row.started_on, finishedOn: row.finished_on }));
+  // Default to the juz in sabaq para (being memorized now), else the first unmemorized one.
+  const memorizedSet = new Set(memorized.map((item) => item.juz));
+  const suggestedJuz =
+    entries.find((row) => lessonTypeOf(row) === "sabaq_para" && row.juz)?.juz ??
+    (Array.from({ length: 30 }, (_, i) => i + 1).find((juz) => !memorizedSet.has(juz)) ?? 1);
   const backHref = "/quran";
 
   return (
@@ -226,6 +248,26 @@ export default async function QuranStudentPage({
             )}
           </div>
         </div>
+
+        <Card className="border shadow-sm">
+          <CardHeader>
+            <CardTitle>Juz test</CardTitle>
+            <CardDescription>
+              {isStaff
+                ? "While a juz test is in progress, sabaq, sabaq para and dhor aren't required: Quran and revision alerts pause and the Quran score is held. Finishing marks the juz memorized."
+                : "Juz tests your child is taking or has finished."}
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <JuzTestPanel
+              studentId={student.id}
+              tests={juzTests}
+              today={today}
+              suggestedJuz={suggestedJuz}
+              canEdit={isStaff}
+            />
+          </CardContent>
+        </Card>
 
         <Card className="border shadow-sm">
           <CardHeader>
@@ -313,7 +355,9 @@ export default async function QuranStudentPage({
                   cell: (row) => (
                     <span className="text-sm">
                       {QURAN_LESSON_LABELS[lessonTypeOf(row)]}
-                      {row.juz ? ` · Juz ${row.juz}` : ""}
+                      {row.juz
+                        ? ` · ${formatJuzPages({ juz: row.juz, fromPage: row.from_page, toPage: row.to_page })}`
+                        : ""}
                     </span>
                   ),
                 },

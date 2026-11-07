@@ -99,8 +99,10 @@ export function avgGradeScore(latestGradePerCourse: number[]): number | null {
  */
 export function quranScore(
   entries: { date: string; lines_memorized: number }[],
+  /** Score as of this date (default now); a juz test freezes it at the test start. */
+  asOf?: string,
 ): QuranScoreResult {
-  const now = new Date().toISOString();
+  const now = asOf ? new Date(`${asOf.slice(0, 10)}T00:00:00.000Z`).toISOString() : new Date().toISOString();
   const recentEnd = new Date(now);
   const recentStart = daysBefore(now, QURAN_RECENT_WINDOW_DAYS);
   const priorEnd = recentStart;
