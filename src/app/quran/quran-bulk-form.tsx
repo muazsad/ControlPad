@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useActionState, useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { useFormStatus } from "react-dom";
-import { CheckCircle2, BookOpen } from "lucide-react";
+import { CheckCircle2, BookOpen, Check } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -31,24 +31,84 @@ type Props = {
   juzTests?: Record<string, number>;
 };
 
-function SubmitBar({ saved }: { saved?: number }) {
-  const { pending } = useFormStatus();
+type RowEntry = { lines: string; para: string; dhor: string };
+
+const EMPTY_ROW: RowEntry = { lines: "", para: "", dhor: "" };
+
+function isFilled(entry: RowEntry | undefined): boolean {
+  return !!entry && (entry.lines.trim() !== "" || entry.para.trim() !== "" || entry.dhor.trim() !== "");
+}
+
+/** Which student a pending submit is for: an id (a row's Save) or "all". */
+function usePendingTarget(): string | null {
+  const { pending, data } = useFormStatus();
+  if (!pending) return null;
+  const only = data?.get("only");
+  return typeof only === "string" && only !== "" ? only : "all";
+}
+
+function SubmitBar({ filledCount }: { filledCount: number }) {
+  const target = usePendingTarget();
   return (
     <div className="sticky bottom-0 z-10 flex items-center justify-between gap-4 border-t bg-card/95 px-4 py-3 backdrop-blur sm:px-6">
-      {saved != null ? (
-        <span className="flex items-center gap-2 text-sm text-status-success">
-          <CheckCircle2 className="size-4" aria-hidden="true" />
-          {saved} lesson{saved === 1 ? "" : "s"} saved
-        </span>
-      ) : (
-        <span className="text-sm text-muted-foreground">
-          Blank boxes are skipped. Enter moves to the next box.
-        </span>
-      )}
-      <Button type="submit" disabled={pending} className="h-10 min-w-36">
-        {pending ? "Saving…" : "Log lessons"}
+      <span className="text-sm text-muted-foreground">
+        {filledCount > 0
+          ? `${filledCount} student${filledCount === 1 ? "" : "s"} filled in, not saved yet.`
+          : "Save each student as you go, or fill in several and save them all at once."}
+      </span>
+      <Button
+        type="submit"
+        disabled={target !== null || filledCount === 0}
+        className="h-10 min-w-36"
+      >
+        {target === "all"
+          ? "Saving…"
+          : filledCount > 1
+            ? `Save all ${filledCount}`
+            : "Save all"}
       </Button>
     </div>
+  );
+}
+
+/** A row's own Save button: submits just this student. */
+function RowSaveButton({
+  studentId,
+  filled,
+  saved,
+}: {
+  studentId: string;
+  filled: boolean;
+  saved: boolean;
+}) {
+  const target = usePendingTarget();
+  if (saved && !filled) {
+    return (
+      <span className="flex h-8 items-center gap-1.5 text-sm font-medium text-status-success">
+        <CheckCircle2 className="size-4" aria-hidden="true" />
+        Saved
+      </span>
+    );
+  }
+  return (
+    <Button
+      type="submit"
+      name="only"
+      value={studentId}
+      variant={filled ? "default" : "outline"}
+      size="sm"
+      disabled={!filled || target !== null}
+      className="h-8 min-w-20"
+    >
+      {target === studentId || (target === "all" && filled) ? (
+        "Saving…"
+      ) : (
+        <>
+          <Check className="size-4" aria-hidden="true" />
+          Save
+        </>
+      )}
+    </Button>
   );
 }
 
@@ -69,37 +129,60 @@ export function QuranBulkForm({
     logQuranLessons,
     { error: null },
   );
-  const dateRef = useRef<HTMLInputElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
-  // Typed sabaq para / dhor sections per student, so they can be shown as chips.
-  const [para, setPara] = useState<Record<string, string>>({});
-  const [dhor, setDhor] = useState<Record<string, string>>({});
+  // Controlled, so React's post-action form reset can't jump it back to today.
+  const [date, setDate] = useState(initialDate);
+  // What's typed in each student's row (sabaq lines, sabaq para, dhor).
+  const [entries, setEntries] = useState<Record<string, RowEntry>>({});
+  // Students saved since the page loaded, to show a "Saved" tick on their row.
+  const [savedIds, setSavedIds] = useState<Set<string>>(new Set());
   const latestMap = new Map(latestEntries.map((e) => [e.student_id, e]));
+  const nameById = new Map(students.map((s) => [s.id, studentName(s)]));
+  const filledCount = students.filter((s) => isFilled(entries[s.id])).length;
+
+  function setField(studentId: string, field: keyof RowEntry, value: string) {
+    setEntries((prev) => ({
+      ...prev,
+      [studentId]: { ...(prev[studentId] ?? EMPTY_ROW), [field]: value },
+    }));
+  }
 
   useEffect(() => {
-    if (state.error) {
-      toast.error("Could not save lessons", { description: state.error });
-    }
-    if (state.saved != null && !state.error) {
-      toast.success(
-        `${state.saved} entr${state.saved === 1 ? "y" : "ies"} logged for ${state.date}`,
-      );
-      // Clear the entry boxes (keep the date) so a second submit can't
-      // log the same lessons twice.
-      const keepDate = dateRef.current?.value;
-      formRef.current?.reset();
-      if (dateRef.current && keepDate) dateRef.current.value = keepDate;
+    const ids = state.savedStudentIds ?? [];
+    if (ids.length > 0) {
+      // Clear only the rows that were saved, so a second click can't log the
+      // same lessons twice and other rows keep what the teacher typed.
       // eslint-disable-next-line react-hooks/set-state-in-effect
-      setPara({});
-      setDhor({});
+      setEntries((prev) => {
+        const next = { ...prev };
+        for (const id of ids) delete next[id];
+        return next;
+      });
+      setSavedIds((prev) => new Set([...prev, ...ids]));
     }
+    if (state.error) {
+      toast.error(ids.length > 0 ? "Saved with a problem" : "Could not save", {
+        description: state.error,
+      });
+    } else if (ids.length > 0) {
+      toast.success(
+        ids.length === 1
+          ? `Saved ${nameById.get(ids[0]) ?? "1 student"} for ${state.date}`
+          : `Saved ${ids.length} students for ${state.date}`,
+      );
+    }
+    // nameById is rebuilt every render; only a new action result should fire this.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state]);
 
   // Enter / Shift+Enter move between entry boxes (same flow as the grade sweep).
+  // Enter never submits the form by itself: with a Save button on every row the
+  // browser would otherwise pick the first row's button.
   function handleKeyDown(event: KeyboardEvent<HTMLFormElement>) {
     const target = event.target as HTMLElement;
-    if (event.key !== "Enter" || !target.dataset.nav) return;
+    if (event.key !== "Enter" || target.tagName !== "INPUT") return;
     event.preventDefault();
+    if (!target.dataset.nav) return;
     const inputs = Array.from(
       formRef.current?.querySelectorAll<HTMLInputElement>("input[data-nav]") ?? [],
     );
@@ -137,16 +220,16 @@ export function QuranBulkForm({
           Lesson date
         </label>
         <Input
-          ref={dateRef}
           id="lesson_date"
           name="date"
           type="date"
-          defaultValue={initialDate}
+          value={date}
+          onChange={(event) => setDate(event.target.value)}
           className="h-9 w-40"
           required
         />
         <span className="text-xs text-muted-foreground">
-          Applies to all rows you fill in below.
+          Applies to every student you save below.
         </span>
       </div>
 
@@ -157,6 +240,8 @@ export function QuranBulkForm({
           const days = latest ? daysSince(latest.date) : null;
           const testJuz = juzTests[student.id];
           // On a juz test sabaq isn't expected, so no stale highlight.
+          const entry = entries[student.id] ?? EMPTY_ROW;
+          const filled = isFilled(entry);
           const stale =
             testJuz === undefined &&
             days !== null &&
@@ -169,6 +254,7 @@ export function QuranBulkForm({
               className={cn(
                 "grid grid-cols-1 gap-3 px-4 py-4 sm:grid-cols-[180px_1fr] sm:items-start sm:px-6",
                 stale && "bg-status-danger-soft/30",
+                filled && !stale && "bg-accent/40",
               )}
             >
               {/* Student info */}
@@ -207,8 +293,8 @@ export function QuranBulkForm({
 
               <input type="hidden" name={`name_${student.id}`} value={studentName(student)} />
 
-              {/* Sabaq | Sabaq para | Dhor */}
-              <div className="grid gap-2 sm:grid-cols-[minmax(110px,140px)_minmax(140px,180px)_minmax(180px,1fr)]">
+              {/* Sabaq | Sabaq para | Dhor | Save */}
+              <div className="grid gap-2 sm:grid-cols-[minmax(110px,140px)_minmax(140px,180px)_minmax(180px,1fr)_auto]">
                 <div className="space-y-1">
                   <label className="text-xs text-muted-foreground" htmlFor={`lines_${student.id}`}>
                     Sabaq lines
@@ -221,6 +307,8 @@ export function QuranBulkForm({
                     inputMode="decimal"
                     className="h-8 text-sm"
                     autoComplete="off"
+                    value={entry.lines}
+                    onChange={(event) => setField(student.id, "lines", event.target.value)}
                   />
                 </div>
                 <div className="space-y-1">
@@ -234,12 +322,10 @@ export function QuranBulkForm({
                     placeholder="e.g. 3: 1-5"
                     className="h-8 text-sm"
                     autoComplete="off"
-                    value={para[student.id] ?? ""}
-                    onChange={(event) =>
-                      setPara((prev) => ({ ...prev, [student.id]: event.target.value }))
-                    }
+                    value={entry.para}
+                    onChange={(event) => setField(student.id, "para", event.target.value)}
                   />
-                  <SectionChips value={para[student.id] ?? ""} />
+                  <SectionChips value={entry.para} />
                 </div>
                 <div className="space-y-1">
                   <label className="text-xs text-muted-foreground" htmlFor={`dhor_${student.id}`}>
@@ -252,12 +338,20 @@ export function QuranBulkForm({
                     placeholder="e.g. 3: 1-5, 7: 10-20"
                     className="h-8 text-sm"
                     autoComplete="off"
-                    value={dhor[student.id] ?? ""}
-                    onChange={(event) =>
-                      setDhor((prev) => ({ ...prev, [student.id]: event.target.value }))
-                    }
+                    value={entry.dhor}
+                    onChange={(event) => setField(student.id, "dhor", event.target.value)}
                   />
-                  <SectionChips value={dhor[student.id] ?? ""} />
+                  <SectionChips value={entry.dhor} />
+                </div>
+                <div className="space-y-1">
+                  <span aria-hidden="true" className="hidden text-xs sm:block">
+                    &nbsp;
+                  </span>
+                  <RowSaveButton
+                    studentId={student.id}
+                    filled={filled}
+                    saved={savedIds.has(student.id)}
+                  />
                 </div>
               </div>
             </div>
@@ -265,7 +359,7 @@ export function QuranBulkForm({
         })}
       </div>
 
-      <SubmitBar saved={state.saved} />
+      <SubmitBar filledCount={filledCount} />
     </form>
   );
 }

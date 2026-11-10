@@ -16,6 +16,8 @@ export type QuranBulkState = {
   error: string | null;
   saved?: number;
   date?: string;
+  /** Students whose lessons were saved by this submit. */
+  savedStudentIds?: string[];
 };
 
 function text(form: FormData, key: string): string {
@@ -37,6 +39,9 @@ function positiveNumber(form: FormData, key: string): number | null {
  * Blank inputs are skipped. Revision rows store 0 lines: only sabaq counts as
  * memorization. Any revised juz is added to the student's memorized juz.
  * One batch insert, plus one batch upsert for memorized juz.
+ *
+ * A row's own Save button submits `only=<id>`: then just that student is saved
+ * and the other rows' boxes are left alone. The bottom button saves every row.
  */
 export async function logQuranLessons(
   _prev: QuranBulkState,
@@ -49,10 +54,15 @@ export async function logQuranLessons(
     return { error: "Choose a valid date." };
   }
 
-  const studentIds = text(form, "student_ids")
+  const listed = text(form, "student_ids")
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean);
+  const only = text(form, "only");
+  if (only && !listed.includes(only)) {
+    return { error: "That student isn't in this list. Reload the page and try again." };
+  }
+  const studentIds = only ? [only] : listed;
   if (studentIds.length === 0) {
     return { error: "No students to log for." };
   }
@@ -124,8 +134,13 @@ export async function logQuranLessons(
   }
 
   if (rows.length === 0) {
-    return { error: "Enter at least one student's lesson before saving." };
+    return {
+      error: only
+        ? `Enter ${nameOf(only)}'s sabaq, sabaq para or dhor before saving.`
+        : "Enter at least one student's lesson before saving.",
+    };
   }
+  const savedStudentIds = [...new Set(rows.map((r) => r.student_id))];
 
   const supabase = await createClient();
   const { error } = await supabase.from("quran_progress").insert(rows);
@@ -142,7 +157,7 @@ export async function logQuranLessons(
   }
 
   revalidatePath("/quran");
-  for (const studentId of new Set(rows.map((r) => r.student_id))) {
+  for (const studentId of savedStudentIds) {
     revalidatePath(`/quran/${studentId}`);
   }
 
@@ -151,9 +166,10 @@ export async function logQuranLessons(
       error: `Lessons saved, but the memorized juz list could not be updated: ${juzError}`,
       saved: rows.length,
       date,
+      savedStudentIds,
     };
   }
-  return { error: null, saved: rows.length, date };
+  return { error: null, saved: rows.length, date, savedStudentIds };
 }
 
 /** Staff toggle on the juz grid: mark a juz memorized (today) or unmark it. */
